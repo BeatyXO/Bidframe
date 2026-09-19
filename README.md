@@ -4,7 +4,7 @@
 
 Bidframe is a single Intelligent Contract plus a reviewer-facing web application for settling security deposits from sealed before/after evidence. A landlord defines the parties, deposit, inventory, move-in evidence hashes, and item-level deduction schedule before funds are locked. At checkout, GenLayer validators inspect the exact evidence bytes and return only a bounded condition classification. The contract converts that classification into a deterministic deduction and never lets the model invent a price, recipient, item, or payout.
 
-> Status: the liveness-safe contract revision is implemented on `main` after audit fixes. The previous StudioNet deployment is superseded and must not be treated as canonical because it predates the recovery methods. The revised contract requires a fresh StudioNet 61999 deployment and live lifecycle proof.
+> Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. Local lint, Direct Mode tests, frontend typecheck, and production build pass. Live proof includes an `UNCHANGED` result and a fail-closed disagreement with zero-deduction recovery. A successful `NEW_DAMAGE` finding and nonzero landlord payout are still required before submission readiness.
 
 ## Why GenLayer
 
@@ -53,7 +53,7 @@ Do not substitute Studio development preview (`61997`) or Bradbury.
 
 ## Frontend
 
-The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical address by default; `VITE_CONTRACT_ADDRESS` can override it. Without a configured address it shows setup guidance and no fabricated sample case. Wallet writes target StudioNet 61999 and wait for finalized execution success before refreshing state.
+The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical address from `VITE_CONTRACT_ADDRESS`. Without a configured address it shows setup guidance and no fabricated sample case. Wallet writes target StudioNet 61999 and wait for finalized execution success before refreshing state.
 
 ```bash
 cd frontend
@@ -101,11 +101,11 @@ genvm-lint check contracts/Bidframe.py
 gltest tests/ -v
 ```
 
-The earlier StudioNet deployment is retained only as historical evidence because it predates the liveness fixes. The revised source must be linted, tested, redeployed, and proven with a complete lifecycle before submission.
+The current deployment is documented in [`docs/SUBMISSION.md`](docs/SUBMISSION.md). The earlier StudioNet deployment is retained only as historical evidence because it predates the liveness fixes.
 
 ## Deployment
 
-The revised contract is **not yet canonically deployed**. After lint/tests pass:
+The current canonical contract is deployed to stable StudioNet 61999. To deploy a future validated revision:
 
 ```bash
 genlayer network set studionet
@@ -113,7 +113,7 @@ genlayer network info
 genlayer deploy --contract contracts/Bidframe.py
 ```
 
-Record the final contract address, deploy transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`.
+Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. A live `NEW_DAMAGE` consensus result and nonzero GEN landlord transfer remain outstanding.
 
 ## License
 
