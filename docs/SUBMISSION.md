@@ -57,10 +57,30 @@ This is **not submission-ready**. A successful live `NEW_DAMAGE` assessment with
 
 ## Frontend delivery
 
-- Canonical build-time setting: `VITE_CONTRACT_ADDRESS=0x3f5F81618cc86604f7094E525F46f37363CD99a7`
+- Live frontend: [https://bidframe-seven.vercel.app/](https://bidframe-seven.vercel.app/)
+- Canonical contract: `0x3f5F81618cc86604f7094E525F46f37363CD99a7`
+- Canonical build-time override: `VITE_CONTRACT_ADDRESS=0x3f5F81618cc86604f7094E525F46f37363CD99a7`
 - Explorer setting: `VITE_EXPLORER_BASE=https://explorer-studio.genlayer.com`
-- Configure these in the Vercel project before deployment. No Vercel deployment was performed in this stage.
-- The app must be rebuilt after setting these values. No production URL is claimed.
+- The frontend also pins the same canonical address as its production-safe default so a missing Vercel environment variable cannot silently disconnect the live app from the documented deployment.
+- Wallets are injected EIP-1193 only; no MetaMask Snap is required.
+
+### Wallet failure root cause and remediation
+
+The earlier browser path manually switched/added StudioNet and then called `genlayer-js@1.1.8` `client.connect('studionet')`. That SDK helper also calls `wallet_getSnaps` and may request the GenLayer MetaMask Snap, which conflicts with Bidframe's injected-wallet-only product boundary and can fail after the chain itself is already correct.
+
+The fixed frontend now:
+
+1. requests accounts;
+2. reads `eth_chainId`;
+3. requests `wallet_switchEthereumChain` to `0xF22F`;
+4. on error 4902, adds GenLayer StudioNet with the canonical RPC, GEN/18 metadata and explorer;
+5. explicitly requests the switch again after adding;
+6. re-reads `eth_chainId` and refuses to construct a write client unless it is exactly `0xF22F`;
+7. creates the `genlayer-js` client only against that verified injected provider;
+8. preserves actionable 4001, 4902, -32002 and nested/plain-object provider errors;
+9. clears cached wallet/client state on `accountsChanged` and `chainChanged`.
+
+The contract source is unchanged by this wallet fix, so the canonical deployment/source-parity evidence remains valid.
 
 ## Historical deployment — superseded
 

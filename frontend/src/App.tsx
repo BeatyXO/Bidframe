@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, BadgeCheck, Building2, ChevronRight, CircleDollarSign, FileCheck2, Fingerprint, Gauge, Image as ImageIcon, LockKeyhole, Menu, Scale, ShieldCheck, Wallet, X } from 'lucide-react'
 import { StatusPill } from './components/StatusPill'
-import { assertSuccessfulFinalizedTransaction, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
+import { assertSuccessfulFinalizedTransaction, CHAIN_HEX, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, getInjectedProvider, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
 
 type Agreement = { id: number; title: string; property_ref: string; terms_hash: string; status: string; landlord: string; tenant: string; deposit_wei: bigint | string; item_count: number; assessed_count: number; raw_deduction_wei: bigint | string; settlement_deduction_wei: bigint | string; projected_refund_wei: bigint | string; has_inconclusive: boolean; inconclusive_count: number }
 type Item = { id: number; label: string; description: string; baseline_url: string; baseline_sha256: string; checkout_url: string; checkout_sha256: string; checkout_submitter: string; evidence_challenged: boolean; replacement_url: string; replacement_proposer: string; assessed: boolean; verdict: string; severity: number; deduction_wei: bigint | string; reasoning: string; inconclusive_resolved: boolean; minor_wei: bigint | string; moderate_wei: bigint | string; severe_wei: bigint | string; missing_wei: bigint | string }
@@ -38,6 +38,36 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.') } finally { setLoading(false) }
   }, [agreementId, configured])
   useEffect(() => { void refresh() }, [refresh])
+
+  useEffect(() => {
+    const provider = getInjectedProvider()
+    if (!provider?.on) return
+
+    const handleAccountsChanged = () => {
+      setWallet('')
+      setClient(null)
+      setNotice('')
+      setError('Wallet account changed. Reconnect Bidframe to continue with the active account.')
+    }
+    const handleChainChanged = (...args: unknown[]) => {
+      const chainId = String(args[0] ?? '').toLowerCase()
+      setClient(null)
+      setNotice('')
+      if (chainId === CHAIN_HEX) {
+        setError('Wallet network changed to StudioNet. Reconnect Bidframe to refresh the active account.')
+      } else {
+        setWallet('')
+        setError(`Wallet left GenLayer StudioNet. Connect again to switch back to 61999 / ${CHAIN_HEX}.`)
+      }
+    }
+
+    provider.on('accountsChanged', handleAccountsChanged)
+    provider.on('chainChanged', handleChainChanged)
+    return () => {
+      provider.removeListener?.('accountsChanged', handleAccountsChanged)
+      provider.removeListener?.('chainChanged', handleChainChanged)
+    }
+  }, [])
 
   async function connect() { try { setError(''); const result = await connectWallet(); setWallet(result.address); setClient(result.client); setNotice('Connected to GenLayer StudioNet · 61999.') } catch (e) { setError(e instanceof Error ? e.message : 'Wallet connection failed.') } }
   async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
