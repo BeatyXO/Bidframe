@@ -32,25 +32,50 @@ jobs:
             console.log('ITEM4_'+i+'='+JSON.stringify(item))
           }
           NODE
-      - name: Query explorer transactions for canonical contract
+      - name: Query compact Agreement 4 transaction proof
         run: |
           node --input-type=module <<'NODE'
-          const addr='0x3f5F81618cc86604f7094E525F46f37363CD99a7'
-          const urls=[
-            `https://explorer-studio.genlayer.com/api/transactions?address=${addr}&limit=100&page=1`,
-            `https://explorer-studio.genlayer.com/api/transactions?search=${addr}&limit=100&page=1`,
-            `https://studio.genlayer.com/api/explorer/transactions?address=${addr}&limit=100&page=1`,
-          ]
-          for (const url of urls) {
-            console.log('EXPLORER_URL='+url)
+          const contract='0x3f5F81618cc86604f7094E525F46f37363CD99a7'.toLowerCase()
+          const landlord='0x98ACB6B20ee0f730d0b433c6f7167de792D8a2Dd'.toLowerCase()
+          const tenant='0x95B37d7bF3F1b1B9e9a1Ae8300c627135C095375'.toLowerCase()
+          const headers={
+            'accept':'application/json,text/plain,*/*',
+            'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
+            'referer':'https://explorer-studio.genlayer.com/txs'
+          }
+          const listUrl='https://explorer-studio.genlayer.com/api/transactions?address='+contract+'&limit=100&page=1'
+          const res=await fetch(listUrl,{headers})
+          console.log('LIST_STATUS='+res.status)
+          const payload=await res.json()
+          const rows=(payload.transactions||[]).filter(tx=>{
+            const t=String(tx.created_at||'')
+            const from=String(tx.from_address||'').toLowerCase()
+            const to=String(tx.to_address||'').toLowerCase()
+            return t>='2026-09-19T14:55:00' && t<='2026-09-19T15:54:30' &&
+              ([contract,landlord,tenant].includes(from) || [contract,landlord,tenant].includes(to))
+          })
+          console.log('MATCHED='+rows.length)
+          for(const tx of rows.sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)))) {
+            const detailUrl='https://explorer-studio.genlayer.com/api/transactions/'+tx.hash
+            let detail={}
             try {
-              const res=await fetch(url,{headers:{
-                'accept':'application/json,text/plain,*/*',
-                'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
-                'referer':'https://explorer-studio.genlayer.com/txs'
-              }})
-              console.log('STATUS='+res.status)
-              console.log((await res.text()).slice(0,60000))
-            } catch (e) { console.log('EXPLORER_ERROR='+String(e)) }
+              const dr=await fetch(detailUrl,{headers})
+              if(dr.ok) detail=await dr.json()
+              else detail={detail_status:dr.status}
+            } catch(e) { detail={detail_error:String(e)} }
+            const compact={
+              hash:tx.hash,
+              status:tx.status,
+              from_address:tx.from_address,
+              to_address:tx.to_address,
+              value:tx.value,
+              created_at:tx.created_at,
+              method:tx.method||tx.method_name||tx.function_name||detail.method||detail.method_name||detail.function_name||null,
+              genvm_result:tx.genvm_result||detail.genvm_result||detail.execution_result||null,
+              consensus_result:tx.consensus_result||detail.consensus_result||detail.result_name||null,
+              input_data:tx.input_data||detail.input_data||null,
+              detail_keys:Object.keys(detail).sort()
+            }
+            console.log('TX='+JSON.stringify(compact))
           }
           NODE
