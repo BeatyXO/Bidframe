@@ -39,7 +39,7 @@ The detailed sanitized public transaction/readback log is [`studionet-lifecycle.
 |---|---|---|
 | Create agreement | [0x7cf56031267210dc923993655c8dab153d7b04ff143a77a382405c1205ee5bd4](https://explorer-studio.genlayer.com/tx/0x7cf56031267210dc923993655c8dab153d7b04ff143a77a382405c1205ee5bd4) | Finalized success; readback agreement 3 |
 | Register item 1 | [0x181111462bf14930d62f8d48658828e51b8bebc60f682e69d780e9e93b17ed96](https://explorer-studio.genlayer.com/tx/0x181111462bf14930d62f8d48658828e51b8bebc60f682e69d780e9e93b17ed96) | Finalized success |
-| Register item 2 | [0xe2f8172ae2ea34fdbb339fe8943f8b0125c4595bc468d4117065d7bf6071e2ed](https://explorer-studio.genlayer.com/tx/0xe2f8172ae2ea34f8b0125c4595bc468d4117065d7bf6071e2ed) | Finalized success |
+| Register item 2 | [0xe2f8172ae2ea34fdbb339fe8943f8b0125c4595bc468d4117065d7bf6071e2ed](https://explorer-studio.genlayer.com/tx/0xe2f8172ae2ea34fdbb339fe8943f8b0125c4595bc468d4117065d7bf6071e2ed) | Finalized success |
 | Register item 3 | [0xa9628a50619052f0844fd757690a81bf9b98a0a982bbffb880a7091ab46c4b3b](https://explorer-studio.genlayer.com/tx/0xa9628a50619052f0844fd757690a81bf9b98a0a982bbffb880a7091ab46c4b3b) | Finalized success |
 | Tenant funds exact 1 GEN | [0xa65186cf7184c41ca8d5b432cf5d9ee62b3a5259cab74a4df60b1d8b70f0e6f4](https://explorer-studio.genlayer.com/tx/0xa65186cf7184c41ca8d5b432cf5d9ee62b3a5259cab74a4df60b1d8b70f0e6f4) | Finalized success; contract balance increased exactly 1 GEN; agreement ACTIVE |
 | Open checkout | [0x3e798cce3daf0e32c53c55fd28981a525702a47963cdfde7a14fcc9200b1b5f8](https://explorer-studio.genlayer.com/tx/0x3e798cce3daf0e32c53c55fd28981a525702a47963cdfde7a14fcc9200b1b5f8) | Finalized success |
