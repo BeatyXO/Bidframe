@@ -4,7 +4,7 @@
 
 Bidframe is a single Intelligent Contract plus a reviewer-facing web application for settling security deposits from sealed before/after evidence. A landlord defines the parties, deposit, inventory, move-in evidence hashes, and item-level deduction schedule before funds are locked. At checkout, GenLayer validators inspect the exact evidence bytes and return only a bounded condition classification. The contract converts that classification into a deterministic deduction and never lets the model invent a price, recipient, item, or payout.
 
-> Status: one contract is deployed to StudioNet 61999; local lint, Direct Mode tests, and frontend build pass. A full live lifecycle and GEN settlement proof remain outstanding.
+> Status: the liveness-safe contract revision is implemented on `main` after audit fixes. The previous StudioNet deployment is superseded and must not be treated as canonical because it predates the recovery methods. The revised contract requires a fresh StudioNet 61999 deployment and live lifecycle proof.
 
 ## Why GenLayer
 
@@ -16,7 +16,7 @@ A normal smart contract can enforce deadlines and arithmetic but cannot reliably
 - `NORMAL_WEAR` → 0 deduction
 - `NEW_DAMAGE` → severity `1`, `2`, or `3`, mapped to the frozen minor/moderate/severe schedule
 - `MISSING` → frozen missing-item deduction
-- `INCONCLUSIVE` → no automatic settlement; the item remains unresolved
+- `INCONCLUSIVE` → no automatic deduction; either party may resolve the item at zero deduction so the deposit cannot remain trapped
 
 ## Architecture
 
@@ -75,7 +75,7 @@ The UI is purple/white, responsive, and exposes:
 - fund the exact GEN deposit from the tenant wallet;
 - open checkout and submit, challenge, propose, and accept evidence replacements;
 - run consensus assessments and display bounded verdicts, severity, reasoning, and deterministic deductions;
-- block READY while any item is incomplete or `INCONCLUSIVE`;
+- block READY while an item is incomplete or has an unresolved `INCONCLUSIVE`; expose zero-deduction recovery for challenged or inconclusive evidence;
 - mark ready, settle, and show final deduction/refund state;
 - connect an injected EIP-1193 wallet to StudioNet 61999;
 - show transaction progress and link transactions/contracts to the Studio explorer.
@@ -86,14 +86,14 @@ The UI is purple/white, responsive, and exposes:
 2. Landlord registers one or more items with `add_item(...)`.
 3. Tenant calls payable `fund_agreement(id)` with the exact GEN deposit.
 4. Either party opens checkout with `open_checkout(id)`.
-5. Checkout evidence is submitted for each item with `submit_checkout_evidence(...)`; the counterparty may challenge before assessment, and replacement evidence needs acceptance from the other party.
-6. Either party calls `assess_item(...)`; GenLayer validators verify hashes and classify visual change.
-7. Once every item is resolved and none is `INCONCLUSIVE`, `mark_ready(id)` freezes settlement totals.
+5. Checkout evidence is submitted for each item with `submit_checkout_evidence(...)`; the counterparty may challenge before assessment, and replacement evidence needs acceptance from the other party. A challenged item may also be conservatively resolved at zero deduction so a challenge cannot deadlock the deposit.
+6. Either party calls `assess_item(...)`; GenLayer validators verify hashes and classify visual change. A finalized `INCONCLUSIVE` can be explicitly resolved at zero deduction.
+7. Once every item is resolved and no unresolved `INCONCLUSIVE` remains, `mark_ready(id)` freezes settlement totals.
 8. Either party calls `settle(id)`; the contract emits deterministic GEN transfers to the landlord and tenant.
 
 ## Testing
 
-The repository contains GenVM lint and Direct Mode tests in `tests/`. On Windows, `tests/conftest.py` works around the installed Direct Mode runner's open stdin tempfile cleanup behavior without changing the contract execution path:
+The repository contains GenVM lint and Direct Mode tests in `tests/`:
 
 ```bash
 python -m pip install genlayer-test genvm-linter
@@ -101,11 +101,11 @@ genvm-lint check contracts/Bidframe.py
 gltest tests/ -v
 ```
 
-The contract deployment is finalized on StudioNet. Agreement lifecycle transactions, transfer receipts, and a measured fee profile remain outstanding until those operations can be performed and observed.
+The earlier StudioNet deployment is retained only as historical evidence because it predates the liveness fixes. The revised source must be linted, tested, redeployed, and proven with a complete lifecycle before submission.
 
 ## Deployment
 
-The contract is **not yet canonically deployed**. After local lint/tests pass:
+The revised contract is **not yet canonically deployed**. After lint/tests pass:
 
 ```bash
 genlayer network set studionet

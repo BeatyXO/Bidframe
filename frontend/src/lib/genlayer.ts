@@ -4,7 +4,7 @@ import { ExecutionResult, TransactionStatus } from 'genlayer-js/types'
 
 export const CHAIN_ID = 61999
 export const EXPLORER_BASE = import.meta.env.VITE_EXPLORER_BASE || 'https://explorer-studio.genlayer.com'
-export const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x7d7559B0723c66eB5994a641b5A26cB6682e7dfF') as `0x${string}` | ''
+export const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '') as `0x${string}` | ''
 
 export const readClient = createClient({ chain: studionet })
 export type WalletClient = ReturnType<typeof createClient>

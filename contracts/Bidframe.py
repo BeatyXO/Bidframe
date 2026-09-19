@@ -28,6 +28,7 @@ class Bidframe(gl.Contract):
     assessed_count: TreeMap[u32, u32]
     total_deduction_wei: TreeMap[u32, u256]
     has_inconclusive: TreeMap[u32, bool]
+    inconclusive_count: TreeMap[u32, u32]
     created_at: TreeMap[u32, str]
     funded_at: TreeMap[u32, str]
     checkout_opened_at: TreeMap[u32, str]
@@ -57,9 +58,10 @@ class Bidframe(gl.Contract):
     item_severity: TreeMap[str, u8]
     item_deduction_wei: TreeMap[str, u256]
     item_reasoning: TreeMap[str, str]
+    item_inconclusive_resolved: TreeMap[str, bool]
 
     def __init__(self):
-        self.agreement_count = u64(0)
+        self.agreement_count = u32(0)
 
     def _now(self) -> str:
         return str(gl.message_raw["datetime"])
@@ -123,6 +125,7 @@ class Bidframe(gl.Contract):
         self.assessed_count[next_id] = u32(0)
         self.total_deduction_wei[next_id] = u256(0)
         self.has_inconclusive[next_id] = False
+        self.inconclusive_count[next_id] = u32(0)
         self.created_at[next_id] = self._now()
         return next_id
 
@@ -137,7 +140,7 @@ class Bidframe(gl.Contract):
     @gl.public.write
     def add_item(
         self,
-        agreement_id: u64,
+        agreement_id: u32,
         label: str,
         description: str,
         move_in_url: str,
@@ -172,6 +175,7 @@ class Bidframe(gl.Contract):
         self.severe_deduction_wei[key] = severe_wei
         self.missing_deduction_wei[key] = missing_wei
         self.item_assessed[key] = False
+        self.item_inconclusive_resolved[key] = False
         self.evidence_challenged[key] = False
         return new_item_id
 
@@ -251,6 +255,8 @@ class Bidframe(gl.Contract):
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         key = self._item_key(agreement_id, item_id)
+        if self.item_assessed[key]:
+            raise gl.vm.UserError("Assessed evidence is immutable")
         if not self.evidence_challenged[key]:
             raise gl.vm.UserError("Evidence is not challenged")
         self._validate_https_url(move_out_url)
@@ -264,6 +270,8 @@ class Bidframe(gl.Contract):
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         key = self._item_key(agreement_id, item_id)
+        if self.item_assessed[key]:
+            raise gl.vm.UserError("Assessed evidence is immutable")
         proposer = self.replacement_proposer.get(key, Address("0x0000000000000000000000000000000000000000"))
         if self.replacement_url.get(key, "") == "":
             raise gl.vm.UserError("No replacement evidence is proposed")
@@ -294,7 +302,6 @@ class Bidframe(gl.Contract):
             raise gl.vm.UserError("Checkout evidence is missing")
         if self.evidence_challenged[key]:
             raise gl.vm.UserError("Resolve the evidence challenge before assessment")
-
         label = str(self.item_label[key])
         description = str(self.item_description[key])
         baseline_url = str(self.baseline_url[key])
@@ -400,9 +407,71 @@ Return JSON exactly with keys:
         self.assessed_count[agreement_id] = u32(int(self.assessed_count[agreement_id]) + 1)
         self.total_deduction_wei[agreement_id] = self.total_deduction_wei[agreement_id] + deduction
         if verdict == "INCONCLUSIVE":
+            self.item_inconclusive_resolved[key] = False
+            self.inconclusive_count[agreement_id] = u32(int(self.inconclusive_count[agreement_id]) + 1)
             self.has_inconclusive[agreement_id] = True
         self.agreement_status[agreement_id] = "ASSESSING"
         return result
+
+    @gl.public.write
+    def resolve_challenged_zero(self, agreement_id: u32, item_id: u32) -> None:
+        """Resolve challenged evidence conservatively at zero deduction."""
+        self._require_agreement(agreement_id)
+        self._require_party(agreement_id)
+        if self.agreement_status[agreement_id] not in ("CHECKOUT", "ASSESSING"):
+            raise gl.vm.UserError("Agreement is not accepting challenge resolution")
+        if int(item_id) <= 0 or int(item_id) > int(self.item_count[agreement_id]):
+            raise gl.vm.UserError("Unknown inventory item")
+
+        key = self._item_key(agreement_id, item_id)
+        if self.item_assessed[key]:
+            raise gl.vm.UserError("Item already assessed")
+        if not self.evidence_challenged[key]:
+            raise gl.vm.UserError("Evidence is not challenged")
+
+        self.item_assessed[key] = True
+        self.item_verdict[key] = "INCONCLUSIVE"
+        self.item_severity[key] = u8(0)
+        self.item_deduction_wei[key] = u256(0)
+        self.item_reasoning[key] = "Challenged evidence resolved conservatively at zero deduction."
+        self.item_inconclusive_resolved[key] = True
+        self.evidence_challenged[key] = False
+        self.replacement_url[key] = ""
+        self.replacement_sha256[key] = ""
+        self.replacement_proposer[key] = Address("0x0000000000000000000000000000000000000000")
+        self.assessed_count[agreement_id] = u32(int(self.assessed_count[agreement_id]) + 1)
+        self.agreement_status[agreement_id] = "ASSESSING"
+
+    @gl.public.write
+    def resolve_inconclusive_zero(self, agreement_id: u32, item_id: u32) -> None:
+        """Resolve a finalized INCONCLUSIVE item at zero deduction.
+
+        Either party may use this conservative escape hatch after consensus has
+        established that the evidence is insufficient. It cannot create or
+        increase a deduction; it only releases the item's liveness blocker.
+        """
+        self._require_agreement(agreement_id)
+        self._require_party(agreement_id)
+        if self.agreement_status[agreement_id] != "ASSESSING":
+            raise gl.vm.UserError("Agreement is not in assessment")
+        if int(item_id) <= 0 or int(item_id) > int(self.item_count[agreement_id]):
+            raise gl.vm.UserError("Unknown inventory item")
+
+        key = self._item_key(agreement_id, item_id)
+        if not self.item_assessed[key] or self.item_verdict.get(key, "") != "INCONCLUSIVE":
+            raise gl.vm.UserError("Only an assessed INCONCLUSIVE item can be resolved")
+        if self.item_inconclusive_resolved[key]:
+            raise gl.vm.UserError("INCONCLUSIVE item already resolved")
+        if self.item_deduction_wei.get(key, u256(0)) != u256(0):
+            raise gl.vm.UserError("INCONCLUSIVE resolution must remain zero deduction")
+
+        current = int(self.inconclusive_count[agreement_id])
+        if current <= 0:
+            raise gl.vm.UserError("Inconclusive counter is inconsistent")
+        remaining = current - 1
+        self.item_inconclusive_resolved[key] = True
+        self.inconclusive_count[agreement_id] = u32(remaining)
+        self.has_inconclusive[agreement_id] = remaining > 0
 
     @gl.public.write
     def mark_ready(self, agreement_id: u32) -> None:
@@ -458,6 +527,7 @@ Return JSON exactly with keys:
             "settlement_deduction_wei": capped_deduction,
             "projected_refund_wei": deposit - capped_deduction,
             "has_inconclusive": self.has_inconclusive[agreement_id],
+            "inconclusive_count": int(self.inconclusive_count[agreement_id]),
             "created_at": self.created_at.get(agreement_id, ""),
             "funded_at": self.funded_at.get(agreement_id, ""),
             "checkout_opened_at": self.checkout_opened_at.get(agreement_id, ""),
@@ -488,6 +558,7 @@ Return JSON exactly with keys:
             "severity": int(self.item_severity.get(key, u8(0))),
             "deduction_wei": self.item_deduction_wei.get(key, u256(0)),
             "reasoning": self.item_reasoning.get(key, ""),
+            "inconclusive_resolved": self.item_inconclusive_resolved[key],
             "minor_wei": self.minor_deduction_wei[key],
             "moderate_wei": self.moderate_deduction_wei[key],
             "severe_wei": self.severe_deduction_wei[key],
