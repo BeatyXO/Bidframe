@@ -237,7 +237,7 @@ footer p { margin: 0; }
 .tx-banner { width: min(1180px, calc(100% - 44px)); margin: 14px auto 0; padding: 11px 15px; border: 1px solid #e4dbed; border-radius: 12px; display: flex; align-items: center; gap: 10px; background: #fff; color: #574667; font-size: 10px; }
 .tx-banner a { display: flex; align-items: center; gap: 4px; margin-left: auto; color: var(--purple-700); font-weight: 800; }
 .tx-dot, .network-dot { display: inline-block; width: 8px; height: 8px; border-radius: 99px; background: #9469c4; }
-.tx-banner.pending .tx-dot, .tx-banner.finalizing .tx-dot { animation: pulse 1.2s infinite; }
+.tx-banner.submitted .tx-dot, .tx-banner.pending .tx-dot, .tx-banner.finalizing .tx-dot { animation: pulse 1.2s infinite; }
 .tx-banner.finalized .tx-dot { background: #31946b; }
 .tx-banner.failed .tx-dot { background: #c8485c; }
 @keyframes pulse { 50% { opacity: .3; } }
@@ -278,3 +278,34 @@ footer p { margin: 0; }
 .draft-gate-message { display: inline-flex; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid #e4d8f3; border-radius: 11px; background: var(--purple-50); color: #5f447a; font-size: 12px; font-weight: 700; }
 .draft-hint { margin: 0; padding: 10px 12px; border-radius: 9px; background: #f5f1fb; color: #604575; font-size: 11px; font-weight: 700; }
 .receipt-link { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 14px; color: var(--purple-700); font-size: 11px; font-weight: 800; }
+
+
+/* Wallet session menu and local transaction reconciliation */
+.wallet-shell { position: relative; }
+.wallet-menu { position: absolute; right: 0; top: calc(100% + 9px); z-index: 45; width: min(330px, calc(100vw - 28px)); padding: 10px; display: grid; gap: 6px; background: #fff; border: 1px solid #e4daee; border-radius: 14px; box-shadow: 0 20px 55px rgba(45,24,66,.18); }
+.wallet-menu-address { padding: 9px 10px 11px; border-bottom: 1px solid #eee7f4; display: grid; gap: 5px; }
+.wallet-menu-address span { font-size: 8px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #91839c; }
+.wallet-menu-address code { font: 9px 'DM Mono', monospace; color: #4d3560; overflow-wrap: anywhere; }
+.wallet-menu button, .wallet-menu a { border: 0; background: transparent; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 10px; border-radius: 9px; color: #4d3a5d; font-size: 10px; font-weight: 800; text-align: left; }
+.wallet-menu button:hover, .wallet-menu a:hover { background: var(--purple-50); }
+.wallet-menu .wallet-disconnect { color: #9d3650; }
+.wallet-menu small { padding: 4px 10px 2px; color: #93869d; line-height: 1.5; font-size: 8px; }
+
+.activity-card { margin: 18px 0 22px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 17px; background: #fff; }
+.activity-card .card-head { margin: 0 0 5px; }
+.activity-note { margin: 0 0 13px; color: #897b92; font-size: 9px; line-height: 1.6; }
+.activity-list { display: grid; gap: 7px; }
+.activity-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 11px; border: 1px solid #eee8f3; border-radius: 10px; background: #fcfbfd; }
+.activity-row > div:first-child { min-width: 0; display: grid; gap: 3px; }
+.activity-row b { color: #483458; font-size: 10px; }
+.activity-row span { color: #8b7f94; font-size: 8px; line-height: 1.5; }
+.activity-row-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.activity-row-actions a { display: inline-flex; align-items: center; gap: 3px; color: var(--purple-700); font: 8px 'DM Mono', monospace; font-weight: 700; }
+
+@media (max-width: 700px) {
+  .wallet-menu { position: fixed; right: 14px; top: 76px; }
+  .case-title-actions { width: 100%; flex-wrap: wrap; }
+  .case-title-actions .case-load { flex: 1; }
+  .activity-row { align-items: flex-start; flex-direction: column; }
+  .activity-row-actions { width: 100%; justify-content: space-between; }
+}
