@@ -125,8 +125,8 @@ def test_evidence_is_write_once_and_challenge_requires_counterparty(direct_vm, d
         contract.challenge_checkout_evidence(agreement_id, 1)
     with direct_vm.prank(direct_bob):
         contract.challenge_checkout_evidence(agreement_id, 1)
-        with direct_vm.expect_revert("Resolve the evidence challenge"):
-            contract.assess_item(agreement_id, 1)
+    item = contract.get_item(agreement_id, 1)
+    assert item["evidence_challenged"] is True
 
 
 def test_replacement_requires_counterparty_acceptance(direct_vm, direct_deploy, direct_alice, direct_bob):
@@ -169,14 +169,92 @@ def test_non_damage_verdicts_zero_and_missing_uses_frozen_cap(direct_vm, direct_
     assert contract.get_item(agreement_id, 1)["deduction_wei"] == 2 * GEN
 
 
-def test_inconclusive_blocks_ready_and_unresolved_items_block_ready(direct_vm, direct_deploy, direct_alice, direct_bob):
+def test_inconclusive_blocks_ready_until_zero_deduction_recovery(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy(CONTRACT)
     agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "INCONCLUSIVE", 0)
     contract.assess_item(agreement_id, 1)
+
+    agreement = contract.get_agreement(agreement_id)
+    item = contract.get_item(agreement_id, 1)
+    assert agreement["has_inconclusive"] is True
+    assert agreement["inconclusive_count"] == 1
+    assert item["deduction_wei"] == 0
+    assert item["inconclusive_resolved"] is False
+
     with direct_vm.expect_revert("INCONCLUSIVE"):
         contract.mark_ready(agreement_id)
-    assert contract.get_agreement(agreement_id)["has_inconclusive"] is True
 
+    direct_vm.sender = direct_alice
+    contract.resolve_inconclusive_zero(agreement_id, 1)
+
+    agreement = contract.get_agreement(agreement_id)
+    item = contract.get_item(agreement_id, 1)
+    assert agreement["has_inconclusive"] is False
+    assert agreement["inconclusive_count"] == 0
+    assert item["inconclusive_resolved"] is True
+    assert item["deduction_wei"] == 0
+
+    contract.mark_ready(agreement_id)
+    assert contract.get_agreement(agreement_id)["status"] == "READY"
+
+    with direct_vm.expect_revert("Agreement is not in assessment"):
+        contract.resolve_inconclusive_zero(agreement_id, 1)
+
+
+
+def test_multiple_inconclusive_items_clear_independently(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract = direct_deploy(CONTRACT)
+    agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "INCONCLUSIVE", 0, count=2)
+    contract.assess_item(agreement_id, 1)
+    contract.assess_item(agreement_id, 2)
+    assert contract.get_agreement(agreement_id)["inconclusive_count"] == 2
+
+    direct_vm.sender = direct_alice
+    contract.resolve_inconclusive_zero(agreement_id, 1)
+    agreement = contract.get_agreement(agreement_id)
+    assert agreement["inconclusive_count"] == 1
+    assert agreement["has_inconclusive"] is True
+    with direct_vm.expect_revert("INCONCLUSIVE"):
+        contract.mark_ready(agreement_id)
+
+    direct_vm.sender = direct_bob
+    contract.resolve_inconclusive_zero(agreement_id, 2)
+    agreement = contract.get_agreement(agreement_id)
+    assert agreement["inconclusive_count"] == 0
+    assert agreement["has_inconclusive"] is False
+
+
+def test_inconclusive_recovery_rejects_conclusive_item(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract = direct_deploy(CONTRACT)
+    agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "UNCHANGED", 0)
+    contract.assess_item(agreement_id, 1)
+    with direct_vm.expect_revert("Only an assessed INCONCLUSIVE"):
+        contract.resolve_inconclusive_zero(agreement_id, 1)
+
+
+def test_challenge_cannot_permanently_block_assessment(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract = direct_deploy(CONTRACT)
+    before_hash = hashlib.sha256(BEFORE).hexdigest()
+    after_hash = hashlib.sha256(AFTER).hexdigest()
+
+    direct_vm.sender = direct_alice
+    agreement_id = contract.create_agreement("Challenge liveness", "C-1", address_string(direct_bob), GEN, HASH_A)
+    contract.add_item(agreement_id, "Fixture", "Registered fixture", "https://evidence.example/before.jpg", before_hash, 0, GEN // 10, GEN // 2, GEN)
+    activate_checkout(contract, direct_vm, agreement_id, direct_bob, GEN)
+
+    direct_vm.sender = direct_alice
+    contract.submit_checkout_evidence(agreement_id, 1, "https://evidence.example/after.jpg", after_hash)
+    direct_vm.sender = direct_bob
+    contract.challenge_checkout_evidence(agreement_id, 1)
+
+    direct_vm.mock_web(r"evidence\.example/before\.jpg", {"status": 200, "body": BEFORE})
+    direct_vm.mock_web(r"evidence\.example/after\.jpg", {"status": 200, "body": AFTER})
+    direct_vm.mock_llm(r"security-deposit settlement", json.dumps({"verdict": "UNCHANGED", "severity": 0, "reasoning": "No meaningful deterioration."}))
+    contract.assess_item(agreement_id, 1)
+
+    item = contract.get_item(agreement_id, 1)
+    assert item["assessed"] is True
+    assert item["verdict"] == "UNCHANGED"
 
 def test_bad_hash_and_unavailable_evidence_fail_closed(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy(CONTRACT)
