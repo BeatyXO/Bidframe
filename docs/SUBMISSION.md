@@ -19,6 +19,7 @@ An earlier saved code-query output was stale and did not represent the canonical
 
 - Wallet/CI/documentation hardening merge: `248836c516457ada6bd8b2426de96caf4c2d3545`
 - GitHub Actions Quality run: [35449480448](https://github.com/BeatyXO/Bidframe/actions/runs/35449480448) — **PASS**
+- Final submission-pass validation run: [35454602671](https://github.com/BeatyXO/Bidframe/actions/runs/35454602671) — **PASS** (GenVM lint, 19 Direct Mode tests, submission fingerprint, `npm ci`, typecheck, production build).
 - Contract source was not changed by the wallet hardening, so the canonical deployment/source-parity record below remains valid.
 - The live production URL is [https://bidframe-seven.vercel.app/](https://bidframe-seven.vercel.app/).
 
