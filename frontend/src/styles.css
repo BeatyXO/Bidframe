@@ -269,3 +269,12 @@ footer p { margin: 0; }
 .card-head { margin: 0 16px 16px; }
 .tx-banner.failed { border-color: #f2cccc; color: #8b2c3c; }
 @media (max-width: 700px) { .tx-banner { width: calc(100% - 28px); align-items: flex-start; flex-wrap: wrap; } .tx-banner a { margin-left: 18px; } .toast { left: 14px; right: 14px; top: 80px; } .item-card { margin: 0 9px 12px; padding: 14px; } .item-controls { grid-template-columns: 1fr; } .case-load { width: 100%; } }
+
+
+/* Resumable DRAFT agreement controls */
+.draft-inventory-card { margin: 22px 0; border-color: #ddd0f3; box-shadow: 0 18px 46px rgba(76,29,149,.08); }
+.draft-inventory-card .inventory-form { margin-top: 16px; }
+.draft-inventory-card code { display: block; overflow-wrap: anywhere; background: var(--purple-50); border: 1px solid #e2d7f2; color: var(--purple-800); padding: 10px 12px; border-radius: 9px; font-family: 'DM Mono', monospace; font-size: 10px; }
+.draft-gate-message { display: inline-flex; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid #e4d8f3; border-radius: 11px; background: var(--purple-50); color: #5f447a; font-size: 12px; font-weight: 700; }
+.draft-hint { margin: 0; padding: 10px 12px; border-radius: 9px; background: #f5f1fb; color: #604575; font-size: 11px; font-weight: 700; }
+.receipt-link { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 14px; color: var(--purple-700); font-size: 11px; font-weight: 800; }
