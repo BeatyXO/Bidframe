@@ -6,7 +6,7 @@ export const CHAIN_ID = 61999
 export const CHAIN_HEX = '0xf22f'
 export const STUDIO_RPC = 'https://studio.genlayer.com/api'
 export const EXPLORER_BASE = import.meta.env.VITE_EXPLORER_BASE || 'https://explorer-studio.genlayer.com'
-export const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '') as `0x${string}` | ''
+export const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '0x3f5F81618cc86604f7094E525F46f37363CD99a7') as `0x${string}`
 
 export const readClient = createClient({ chain: studionet })
 export type WalletClient = ReturnType<typeof createClient>
