@@ -1,0 +1,50 @@
+name: Probe Agreement 4
+
+on:
+  push:
+    branches:
+      - final/submission-pass
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Read Agreement 4 from StudioNet
+        working-directory: frontend
+        run: |
+          node --input-type=module <<'NODE'
+          import { createClient } from 'genlayer-js'
+          import { studionet } from 'genlayer-js/chains'
+          const client = createClient({ chain: studionet })
+          const address = '0x3f5F81618cc86604f7094E525F46f37363CD99a7'
+          const agreement = await client.readContract({ address, functionName: 'get_agreement', args: [4n] })
+          console.log('AGREEMENT4='+JSON.stringify(agreement))
+          const count = Number(agreement.item_count ?? 0)
+          for (let i=1;i<=count;i++) {
+            const item = await client.readContract({ address, functionName: 'get_item', args: [4n, BigInt(i)] })
+            console.log('ITEM4_'+i+'='+JSON.stringify(item))
+          }
+          NODE
+      - name: Query explorer transactions for canonical contract
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          base='https://explorer-studio.genlayer.com/api/transactions'
+          addr='0x3f5F81618cc86604f7094E525F46f37363CD99a7'
+          for query in [f'?address={addr}&limit=100&page=1', f'?search={addr}&limit=100&page=1']:
+              url=base+query
+              print('EXPLORER_URL='+url)
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as r:
+                      data=json.load(r)
+                  print(json.dumps(data, sort_keys=True))
+              except Exception as e:
+                  print('EXPLORER_ERROR='+repr(e))
+          PY
