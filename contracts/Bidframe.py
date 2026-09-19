@@ -130,8 +130,11 @@ class Bidframe(gl.Contract):
         return next_id
 
     @gl.public.view
-    def get_latest_agreement_for_landlord(self, landlord_address: Address) -> u32:
-        agreement_id = self.latest_agreement_by_landlord.get(landlord_address, u32(0))
+    def get_latest_agreement_for_landlord(self, landlord_address: str) -> u32:
+        address = landlord_address
+        if not isinstance(address, Address):
+            address = Address(address)
+        agreement_id = self.latest_agreement_by_landlord.get(address, u32(0))
         if int(agreement_id) == 0:
             raise gl.vm.UserError("No agreement exists for this landlord")
         return agreement_id

@@ -65,6 +65,7 @@ def test_create_agreement_and_inventory(direct_vm, direct_deploy, direct_alice, 
     agreement_id = create_draft(contract, direct_vm, direct_alice, direct_bob)
     assert contract.get_agreement(agreement_id)["status"] == "DRAFT"
     assert contract.get_latest_agreement_for_landlord(contract.landlord[agreement_id]) == agreement_id
+    assert contract.get_latest_agreement_for_landlord(str(contract.landlord[agreement_id])) == agreement_id
     assert contract.get_item(agreement_id, 1)["label"] == "Item 1"
 
 
