@@ -36,7 +36,7 @@ jobs:
         run: |
           python - <<'PY'
           import json, urllib.request
-          base='https://explorer-studio.genlayer.com/api/transactions'
+          base='https://studio.genlayer.com/api/explorer/transactions'
           addr='0x3f5F81618cc86604f7094E525F46f37363CD99a7'
           for query in [f'?address={addr}&limit=100&page=1', f'?search={addr}&limit=100&page=1']:
               url=base+query
