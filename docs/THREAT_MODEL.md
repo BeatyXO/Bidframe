@@ -19,7 +19,8 @@ Bidframe assumes two economically opposed parties and potentially adversarial pu
 
 ## Known limitations before submission
 
-1. The contract still requires current `genvm-lint` and `gltest` execution locally.
-2. Native value-transfer settlement needs a live Studio lifecycle test because message fee allocation and Studio behavior must be proven, not assumed.
-3. The final submission should include at least one ambiguous/inconclusive visual case and one validator-disagreement case.
+1. The deployment is finalized on StudioNet 61999; a real lifecycle with public image evidence is still required.
+2. Native GEN funding and emitted settlement transfers have passed Direct Mode calls but still need live StudioNet balance/transaction proof.
+3. Direct Mode covers `INCONCLUSIVE` blocking and validator disagreement; a real ambiguous image case remains useful deployment evidence.
 4. URLs are HTTPS + hash-bound, but availability remains external. Unavailable sources intentionally fail closed rather than being treated as evidence.
+

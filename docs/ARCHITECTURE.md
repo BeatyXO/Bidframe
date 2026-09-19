@@ -90,4 +90,5 @@ Before assessment, the counterparty can challenge submitted move-out evidence. T
 - deduction to the frozen landlord address;
 - remainder to the frozen tenant address.
 
-The frontend must display the deposit separately from protocol transaction fees.
+The frontend displays the deposit separately from protocol transaction fees. Writes remain pending in the UI until the SDK reports `FINALIZED`; the UI then checks for successful execution before refreshing contract state.
+

@@ -15,24 +15,25 @@ class _Recipient:
 
 
 class Bidframe(gl.Contract):
-    agreement_count: u64
+    agreement_count: u32
 
-    agreement_title: TreeMap[u64, str]
-    property_ref: TreeMap[u64, str]
-    terms_hash: TreeMap[u64, str]
-    agreement_status: TreeMap[u64, str]
-    landlord: TreeMap[u64, Address]
-    tenant: TreeMap[u64, Address]
-    deposit_wei: TreeMap[u64, u256]
-    item_count: TreeMap[u64, u32]
-    assessed_count: TreeMap[u64, u32]
-    total_deduction_wei: TreeMap[u64, u256]
-    has_inconclusive: TreeMap[u64, bool]
-    created_at: TreeMap[u64, str]
-    funded_at: TreeMap[u64, str]
-    checkout_opened_at: TreeMap[u64, str]
-    ready_at: TreeMap[u64, str]
-    settled_at: TreeMap[u64, str]
+    agreement_title: TreeMap[u32, str]
+    property_ref: TreeMap[u32, str]
+    terms_hash: TreeMap[u32, str]
+    agreement_status: TreeMap[u32, str]
+    landlord: TreeMap[u32, Address]
+    tenant: TreeMap[u32, Address]
+    deposit_wei: TreeMap[u32, u256]
+    item_count: TreeMap[u32, u32]
+    assessed_count: TreeMap[u32, u32]
+    total_deduction_wei: TreeMap[u32, u256]
+    has_inconclusive: TreeMap[u32, bool]
+    created_at: TreeMap[u32, str]
+    funded_at: TreeMap[u32, str]
+    checkout_opened_at: TreeMap[u32, str]
+    ready_at: TreeMap[u32, str]
+    settled_at: TreeMap[u32, str]
+    latest_agreement_by_landlord: TreeMap[Address, u32]
 
     item_label: TreeMap[str, str]
     item_description: TreeMap[str, str]
@@ -63,19 +64,19 @@ class Bidframe(gl.Contract):
     def _now(self) -> str:
         return str(gl.message_raw["datetime"])
 
-    def _item_key(self, agreement_id: u64, item_id: u32) -> str:
+    def _item_key(self, agreement_id: u32, item_id: u32) -> str:
         return f"{int(agreement_id)}:{int(item_id)}"
 
-    def _require_agreement(self, agreement_id: u64) -> None:
+    def _require_agreement(self, agreement_id: u32) -> None:
         if int(agreement_id) <= 0 or int(agreement_id) > int(self.agreement_count):
             raise gl.vm.UserError("Unknown agreement")
 
-    def _require_party(self, agreement_id: u64) -> None:
+    def _require_party(self, agreement_id: u32) -> None:
         sender = gl.message.sender_address
         if sender != self.landlord[agreement_id] and sender != self.tenant[agreement_id]:
             raise gl.vm.UserError("Only an agreement party may perform this action")
 
-    def _require_landlord(self, agreement_id: u64) -> None:
+    def _require_landlord(self, agreement_id: u32) -> None:
         if gl.message.sender_address != self.landlord[agreement_id]:
             raise gl.vm.UserError("Only the landlord may perform this action")
 
@@ -99,7 +100,7 @@ class Bidframe(gl.Contract):
         tenant_address: str,
         deposit_amount_wei: u256,
         frozen_terms_sha256: str,
-    ) -> u64:
+    ) -> u32:
         if len(title.strip()) < 3 or len(title) > 120:
             raise gl.vm.UserError("Title must be between 3 and 120 characters")
         if len(property_reference.strip()) < 2 or len(property_reference) > 120:
@@ -108,13 +109,14 @@ class Bidframe(gl.Contract):
             raise gl.vm.UserError("Deposit must be greater than zero")
         self._validate_hash(frozen_terms_sha256)
 
-        next_id = u64(int(self.agreement_count) + 1)
+        next_id = u32(int(self.agreement_count) + 1)
         self.agreement_count = next_id
         self.agreement_title[next_id] = title.strip()
         self.property_ref[next_id] = property_reference.strip()
         self.terms_hash[next_id] = frozen_terms_sha256.lower()
         self.agreement_status[next_id] = "DRAFT"
         self.landlord[next_id] = gl.message.sender_address
+        self.latest_agreement_by_landlord[gl.message.sender_address] = next_id
         self.tenant[next_id] = Address(tenant_address)
         self.deposit_wei[next_id] = deposit_amount_wei
         self.item_count[next_id] = u32(0)
@@ -123,6 +125,14 @@ class Bidframe(gl.Contract):
         self.has_inconclusive[next_id] = False
         self.created_at[next_id] = self._now()
         return next_id
+
+    @gl.public.view
+    def get_latest_agreement_for_landlord(self, landlord_address: str) -> u32:
+        address = Address(landlord_address)
+        agreement_id = self.latest_agreement_by_landlord.get(address, u32(0))
+        if int(agreement_id) == 0:
+            raise gl.vm.UserError("No agreement exists for this landlord")
+        return agreement_id
 
     @gl.public.write
     def add_item(
@@ -166,7 +176,7 @@ class Bidframe(gl.Contract):
         return new_item_id
 
     @gl.public.write.payable
-    def fund_agreement(self, agreement_id: u64) -> None:
+    def fund_agreement(self, agreement_id: u32) -> None:
         self._require_agreement(agreement_id)
         if gl.message.sender_address != self.tenant[agreement_id]:
             raise gl.vm.UserError("Only the tenant may fund the agreement")
@@ -181,7 +191,7 @@ class Bidframe(gl.Contract):
         self.funded_at[agreement_id] = self._now()
 
     @gl.public.write
-    def open_checkout(self, agreement_id: u64) -> None:
+    def open_checkout(self, agreement_id: u32) -> None:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         if self.agreement_status[agreement_id] != "ACTIVE":
@@ -192,7 +202,7 @@ class Bidframe(gl.Contract):
     @gl.public.write
     def submit_checkout_evidence(
         self,
-        agreement_id: u64,
+        agreement_id: u32,
         item_id: u32,
         move_out_url: str,
         move_out_sha256: str,
@@ -218,7 +228,7 @@ class Bidframe(gl.Contract):
         self.agreement_status[agreement_id] = "ASSESSING"
 
     @gl.public.write
-    def challenge_checkout_evidence(self, agreement_id: u64, item_id: u32) -> None:
+    def challenge_checkout_evidence(self, agreement_id: u32, item_id: u32) -> None:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         key = self._item_key(agreement_id, item_id)
@@ -233,7 +243,7 @@ class Bidframe(gl.Contract):
     @gl.public.write
     def propose_replacement_evidence(
         self,
-        agreement_id: u64,
+        agreement_id: u32,
         item_id: u32,
         move_out_url: str,
         move_out_sha256: str,
@@ -250,7 +260,7 @@ class Bidframe(gl.Contract):
         self.replacement_proposer[key] = gl.message.sender_address
 
     @gl.public.write
-    def accept_replacement_evidence(self, agreement_id: u64, item_id: u32) -> None:
+    def accept_replacement_evidence(self, agreement_id: u32, item_id: u32) -> None:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         key = self._item_key(agreement_id, item_id)
@@ -269,7 +279,7 @@ class Bidframe(gl.Contract):
         self.replacement_proposer[key] = Address("0x0000000000000000000000000000000000000000")
 
     @gl.public.write
-    def assess_item(self, agreement_id: u64, item_id: u32) -> typing.Any:
+    def assess_item(self, agreement_id: u32, item_id: u32) -> typing.Any:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         if self.agreement_status[agreement_id] not in ("CHECKOUT", "ASSESSING"):
@@ -295,10 +305,12 @@ class Bidframe(gl.Contract):
         def classify() -> typing.Any:
             before = gl.nondet.web.get(baseline_url)
             after = gl.nondet.web.get(checkout_url)
-            if before.status_code != 200 or after.status_code != 200:
+            if before.status != 200 or after.status != 200:
                 raise gl.vm.UserError("[EXTERNAL] Evidence URL unavailable")
             before_bytes = before.body
             after_bytes = after.body
+            if before_bytes is None or after_bytes is None:
+                raise gl.vm.UserError("[EXTERNAL] Evidence URL returned no image bytes")
             if hashlib.sha256(before_bytes).hexdigest().lower() != baseline_hash:
                 raise gl.vm.UserError("Baseline evidence hash mismatch")
             if hashlib.sha256(after_bytes).hexdigest().lower() != checkout_hash:
@@ -393,7 +405,7 @@ Return JSON exactly with keys:
         return result
 
     @gl.public.write
-    def mark_ready(self, agreement_id: u64) -> None:
+    def mark_ready(self, agreement_id: u32) -> None:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         if self.agreement_status[agreement_id] != "ASSESSING":
@@ -406,7 +418,7 @@ Return JSON exactly with keys:
         self.ready_at[agreement_id] = self._now()
 
     @gl.public.write
-    def settle(self, agreement_id: u64) -> None:
+    def settle(self, agreement_id: u32) -> None:
         self._require_agreement(agreement_id)
         self._require_party(agreement_id)
         if self.agreement_status[agreement_id] != "READY":
@@ -426,7 +438,7 @@ Return JSON exactly with keys:
             _Recipient(self.tenant[agreement_id]).emit_transfer(value=refund)
 
     @gl.public.view
-    def get_agreement(self, agreement_id: u64) -> typing.Any:
+    def get_agreement(self, agreement_id: u32) -> typing.Any:
         self._require_agreement(agreement_id)
         deposit = self.deposit_wei[agreement_id]
         raw_deduction = self.total_deduction_wei[agreement_id]
@@ -454,7 +466,7 @@ Return JSON exactly with keys:
         }
 
     @gl.public.view
-    def get_item(self, agreement_id: u64, item_id: u32) -> typing.Any:
+    def get_item(self, agreement_id: u32, item_id: u32) -> typing.Any:
         self._require_agreement(agreement_id)
         if int(item_id) <= 0 or int(item_id) > int(self.item_count[agreement_id]):
             raise gl.vm.UserError("Unknown inventory item")
@@ -467,7 +479,10 @@ Return JSON exactly with keys:
             "baseline_sha256": self.baseline_sha256[key],
             "checkout_url": self.checkout_url.get(key, ""),
             "checkout_sha256": self.checkout_sha256.get(key, ""),
+            "checkout_submitter": str(self.checkout_submitter.get(key, Address("0x0000000000000000000000000000000000000000"))),
             "evidence_challenged": self.evidence_challenged[key],
+            "replacement_url": self.replacement_url.get(key, ""),
+            "replacement_proposer": str(self.replacement_proposer.get(key, Address("0x0000000000000000000000000000000000000000"))),
             "assessed": self.item_assessed[key],
             "verdict": self.item_verdict.get(key, ""),
             "severity": int(self.item_severity.get(key, u8(0))),

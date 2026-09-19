@@ -1,253 +1,124 @@
-import { useMemo, useState } from 'react'
-import {
-  ArrowUpRight,
-  BadgeCheck,
-  Building2,
-  ChevronRight,
-  CircleDollarSign,
-  FileCheck2,
-  Fingerprint,
-  Gauge,
-  Image as ImageIcon,
-  LockKeyhole,
-  Menu,
-  Scale,
-  ShieldCheck,
-  Sparkles,
-  Wallet,
-  X,
-} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowUpRight, BadgeCheck, Building2, ChevronRight, CircleDollarSign, FileCheck2, Fingerprint, Gauge, Image as ImageIcon, LockKeyhole, Menu, Scale, ShieldCheck, Wallet, X } from 'lucide-react'
 import { StatusPill } from './components/StatusPill'
-import { CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, isContractConfigured } from './lib/genlayer'
-import type { AgreementSummary, SettlementItem, Verdict } from './types'
+import { CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
 
+type Agreement = { id: number; title: string; property_ref: string; terms_hash: string; status: string; landlord: string; tenant: string; deposit_wei: bigint | string; item_count: number; assessed_count: number; raw_deduction_wei: bigint | string; settlement_deduction_wei: bigint | string; projected_refund_wei: bigint | string; has_inconclusive: boolean }
+type Item = { id: number; label: string; description: string; baseline_url: string; baseline_sha256: string; checkout_url: string; checkout_sha256: string; checkout_submitter: string; evidence_challenged: boolean; replacement_url: string; replacement_proposer: string; assessed: boolean; verdict: string; severity: number; deduction_wei: bigint | string; reasoning: string; minor_wei: bigint | string; moderate_wei: bigint | string; severe_wei: bigint | string; missing_wei: bigint | string }
+type TxState = { stage: 'pending' | 'finalizing' | 'finalized' | 'failed'; hash?: string; message: string }
 const GEN = 10n ** 18n
-
-const agreement: AgreementSummary = {
-  id: 1,
-  title: 'Atlas Lofts · Unit 4B',
-  propertyRef: 'LAG-ATL-4B-0926',
-  status: 'ASSESSING',
-  depositWei: 35n * GEN / 10n,
-  landlord: '0x4d2A…8C31',
-  tenant: '0x91Fe…20B7',
-  assessed: 3,
-  itemCount: 5,
-  deductionWei: 55n * GEN / 100n,
-  unresolved: 1,
-}
-
-const items: SettlementItem[] = [
-  { id: 1, name: 'Living room wall', description: 'White emulsion wall, north elevation', status: 'Assessed', verdict: 'NORMAL_WEAR', severity: 0, deductionWei: 0n, baselineHash: 'b4f8…92d1', checkoutHash: '0fa1…37c0' },
-  { id: 2, name: 'Kitchen worktop', description: 'Quartz surface beside sink', status: 'Assessed', verdict: 'NEW_DAMAGE', severity: 2, deductionWei: 55n * GEN / 100n, baselineHash: '18cc…e902', checkoutHash: '992a…c8f4' },
-  { id: 3, name: 'Bedroom wardrobe', description: 'Built-in two-door wardrobe', status: 'Assessed', verdict: 'UNCHANGED', severity: 0, deductionWei: 0n, baselineHash: '6c2d…64ba', checkoutHash: '10aa…a0d1' },
-  { id: 4, name: 'Dining chair #4', description: 'Upholstered walnut dining chair', status: 'Ready', baselineHash: '8de1…842f', checkoutHash: 'cea7…b990' },
-  { id: 5, name: 'Entryway mirror', description: 'Full-length framed mirror', status: 'Awaiting evidence', baselineHash: '770c…f261' },
-]
-
-function gen(wei: bigint) {
-  return `${(Number(wei) / Number(GEN)).toFixed(2)} GEN`
-}
-
-function verdictTone(v?: Verdict): 'purple' | 'green' | 'amber' | 'slate' | 'red' {
-  if (v === 'UNCHANGED') return 'green'
-  if (v === 'NORMAL_WEAR') return 'slate'
-  if (v === 'NEW_DAMAGE') return 'amber'
-  if (v === 'MISSING') return 'red'
-  return 'purple'
-}
+const emptyItem = { label: '', description: '', baselineUrl: '', baselineHash: '', minor: '0', moderate: '0', severe: '0', missing: '0' }
+function amount(value: bigint | string | number | undefined) { return BigInt(value ?? 0) }
+function gen(value: bigint | string | number | undefined) { return `${(Number(amount(value)) / Number(GEN)).toFixed(3)} GEN` }
+function genWei(value: string) { if (!/^\d+(\.\d{0,18})?$/.test(value)) throw new Error('Enter a non-negative GEN amount with at most 18 decimal places.'); const [whole, fraction = ''] = value.split('.'); return BigInt(whole) * GEN + BigInt((fraction + '0'.repeat(18)).slice(0, 18)) }
+function hashFile(file: File): Promise<string> { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = async () => { try { const bytes = await crypto.subtle.digest('SHA-256', reader.result as ArrayBuffer); resolve(Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('')) } catch (e) { reject(e) } }; reader.onerror = () => reject(reader.error); reader.readAsArrayBuffer(file) }) }
+function verdictTone(value: string) { return value === 'UNCHANGED' ? 'green' : value === 'NORMAL_WEAR' ? 'slate' : value === 'NEW_DAMAGE' ? 'amber' : value === 'MISSING' ? 'red' : 'purple' }
 
 export default function App() {
   const [wallet, setWallet] = useState('')
-  const [walletError, setWalletError] = useState('')
+  const [client, setClient] = useState<WalletClient | null>(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [active, setActive] = useState<'overview' | 'case' | 'create'>('overview')
+  const [agreementId, setAgreementId] = useState('')
+  const [agreement, setAgreement] = useState<Agreement | null>(null)
+  const [items, setItems] = useState<Item[]>([])
+  const [loading, setLoading] = useState(false)
+  const [tx, setTx] = useState<TxState | null>(null)
   const configured = isContractConfigured()
 
-  const progress = useMemo(() => Math.round((agreement.assessed / agreement.itemCount) * 100), [])
-
-  async function handleConnect() {
+  const refresh = useCallback(async (id = agreementId) => {
+    if (!configured || !id) return
+    setLoading(true); setError('')
     try {
-      setWalletError('')
-      const result = await connectWallet()
-      setWallet(result.address)
-    } catch (error) {
-      setWalletError(error instanceof Error ? error.message : 'Wallet connection failed')
-    }
+      const a = await readContract<Agreement>('get_agreement', [BigInt(id)])
+      const rows = await Promise.all(Array.from({ length: Number(a.item_count) }, (_, i) => readContract<Item>('get_item', [BigInt(id), BigInt(i + 1)])))
+      setAgreement({ ...a, deposit_wei: amount(a.deposit_wei), raw_deduction_wei: amount(a.raw_deduction_wei), settlement_deduction_wei: amount(a.settlement_deduction_wei), projected_refund_wei: amount(a.projected_refund_wei) }); setItems(rows)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.') } finally { setLoading(false) }
+  }, [agreementId, configured])
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function connect() { try { setError(''); const result = await connectWallet(); setWallet(result.address); setClient(result.client); setNotice('Connected to GenLayer StudioNet · 61999.') } catch (e) { setError(e instanceof Error ? e.message : 'Wallet connection failed.') } }
+  async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
+    if (!client) { setError('Connect an injected wallet before writing.'); return }
+    setError(''); setNotice(''); setTx({ stage: 'pending', message: `${label}: submitting to StudioNet…` })
+    try {
+      // SDK submission returns the canonical transaction hash; finalization can take several minutes.
+      const pending = await submitAndTrack(client, functionName, args, value, label, setTx)
+      setTx({ stage: 'finalized', hash: pending.hash, message: `${label}: finalized successfully.` }); setNotice(`${label} is finalized. State refreshed from the contract.`)
+      if (refreshId) await refresh(refreshId)
+      return { hash: pending.hash, returnValue: pending.returnValue }
+    } catch (e) { const message = e instanceof Error ? e.message : 'Transaction failed.'; setTx(current => ({ stage: 'failed', hash: current?.hash, message })); setError(message) }
   }
 
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <button className="brand" onClick={() => setActive('overview')} aria-label="Bidframe home">
-          <span className="brand-mark"><Scale size={18} /></span>
-          <span>Bidframe</span>
-        </button>
-        <nav className="desktop-nav">
-          <button className={active === 'overview' ? 'nav-active' : ''} onClick={() => setActive('overview')}>Overview</button>
-          <button className={active === 'case' ? 'nav-active' : ''} onClick={() => setActive('case')}>Settlement case</button>
-          <button className={active === 'create' ? 'nav-active' : ''} onClick={() => setActive('create')}>New agreement</button>
-        </nav>
-        <div className="top-actions">
-          <span className="network-chip"><span className="network-dot" /> StudioNet · {CHAIN_ID}</span>
-          <button className="wallet-btn" onClick={handleConnect}><Wallet size={16} />{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Connect wallet'}</button>
-          <button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        </div>
-      </header>
+  const progress = useMemo(() => agreement?.item_count ? Math.round(agreement.assessed_count / agreement.item_count * 100) : 0, [agreement])
+  const settled = agreement?.status === 'SETTLED'
 
-      {mobileOpen && <div className="mobile-menu">
-        <button onClick={() => { setActive('overview'); setMobileOpen(false) }}>Overview</button>
-        <button onClick={() => { setActive('case'); setMobileOpen(false) }}>Settlement case</button>
-        <button onClick={() => { setActive('create'); setMobileOpen(false) }}>New agreement</button>
-      </div>}
-
-      {walletError && <div className="toast error-toast">{walletError}</div>}
-      {!configured && <div className="demo-banner"><Sparkles size={15} /> Interface is in reviewer/demo mode until <code>VITE_CONTRACT_ADDRESS</code> is set after deployment.</div>}
-
-      <main>
-        {active === 'overview' && <Overview onOpen={() => setActive('case')} progress={progress} configured={configured} />}
-        {active === 'case' && <CaseView progress={progress} />}
-        {active === 'create' && <CreateView connected={Boolean(wallet)} onConnect={handleConnect} />}
-      </main>
-
-      <footer>
-        <div className="footer-brand"><span className="brand-mark mini"><Scale size={14} /></span> Bidframe</div>
-        <p>Evidence-bound security-deposit settlement. One Intelligent Contract. StudioNet 61999.</p>
-        <div className="footer-links">
-          {configured && <a href={explorerAddress(CONTRACT_ADDRESS)} target="_blank" rel="noreferrer">Contract <ArrowUpRight size={13} /></a>}
-          <a href="https://studio.genlayer.com" target="_blank" rel="noreferrer">GenLayer Studio <ArrowUpRight size={13} /></a>
-        </div>
-      </footer>
-    </div>
-  )
+  return <div className="app-shell">
+    <header className="topbar"><button className="brand" onClick={() => setActive('overview')}><span className="brand-mark"><Scale size={18} /></span><span>Bidframe</span></button>
+      <nav className="desktop-nav"><button className={active === 'overview' ? 'nav-active' : ''} onClick={() => setActive('overview')}>Overview</button><button className={active === 'case' ? 'nav-active' : ''} onClick={() => setActive('case')}>Settlement case</button><button className={active === 'create' ? 'nav-active' : ''} onClick={() => setActive('create')}>New agreement</button></nav>
+      <div className="top-actions"><span className="network-chip"><span className="network-dot" /> StudioNet · {CHAIN_ID}</span><button className="wallet-btn" onClick={connect}><Wallet size={16} />{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Connect wallet'}</button><button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button></div>
+    </header>
+    {mobileOpen && <div className="mobile-menu"><button onClick={() => { setActive('overview'); setMobileOpen(false) }}>Overview</button><button onClick={() => { setActive('case'); setMobileOpen(false) }}>Settlement case</button><button onClick={() => { setActive('create'); setMobileOpen(false) }}>New agreement</button></div>}
+    {error && <div className="toast error-toast">{error}</div>}{notice && <div className="toast">{notice}</div>}
+    {tx && <div className={`tx-banner ${tx.stage}`}><span className="tx-dot" /><b>{tx.message}</b>{tx.hash && <a href={explorerTx(tx.hash)} target="_blank" rel="noreferrer">Transaction {tx.hash.slice(0, 10)}… <ArrowUpRight size={13} /></a>}</div>}
+    {!configured && <div className="demo-banner"><ShieldCheck size={15} /> Live mode is unavailable until <code>VITE_CONTRACT_ADDRESS</code> contains the deployed StudioNet 61999 contract. No sample case is shown.</div>}
+    <main>{active === 'overview' && <Overview agreement={agreement} progress={progress} onOpen={() => setActive('case')} onLoad={id => { setAgreementId(id); void refresh(id); setActive('case') }} />}
+      {active === 'case' && <CaseView agreement={agreement} items={items} id={agreementId} setId={setAgreementId} loading={loading} refresh={id => void refresh(id)} transact={transact} wallet={wallet} settled={Boolean(settled)} />}
+      {active === 'create' && <CreateView connected={Boolean(wallet)} wallet={wallet} connect={connect} transact={transact} setAgreementId={setAgreementId} refresh={refresh} setActive={setActive} />}</main>
+    <footer><div className="footer-brand"><span className="brand-mark mini"><Scale size={14} /></span> Bidframe</div><p>Evidence-bound security-deposit settlement. One Intelligent Contract. StudioNet 61999.</p><div className="footer-links">{configured && <a href={explorerAddress(CONTRACT_ADDRESS)} target="_blank" rel="noreferrer">Contract <ArrowUpRight size={13} /></a>}<a href="https://studio.genlayer.com" target="_blank" rel="noreferrer">GenLayer Studio <ArrowUpRight size={13} /></a></div></footer>
+  </div>
 }
 
-function Overview({ onOpen, progress, configured }: { onOpen: () => void; progress: number; configured: boolean }) {
-  return <>
-    <section className="hero page-width">
-      <div className="hero-copy">
-        <StatusPill>Consensus security-deposit settlement</StatusPill>
-        <h1>Physical condition,<br /><span>settled by evidence.</span></h1>
-        <p>Bidframe binds move-in evidence, deduction caps and deposit funds before checkout. GenLayer validators classify the condition change; deterministic contract logic calculates the money.</p>
-        <div className="hero-actions">
-          <button className="primary-btn" onClick={onOpen}>Open live case <ChevronRight size={17} /></button>
-          <a className="text-link" href="https://docs.genlayer.com/developers/intelligent-contracts/features/image-processing" target="_blank" rel="noreferrer">How consensus sees evidence <ArrowUpRight size={14} /></a>
-        </div>
-      </div>
-      <div className="hero-panel">
-        <div className="hero-panel-top">
-          <div><span className="eyebrow">CASE #001</span><h3>{agreement.title}</h3></div>
-          <StatusPill tone="purple">Assessing</StatusPill>
-        </div>
-        <div className="lock-visual"><LockKeyhole size={29} /><div><strong>{gen(agreement.depositWei)}</strong><span>deposit locked in contract</span></div></div>
-        <div className="progress-head"><span>Evidence assessment</span><strong>{agreement.assessed}/{agreement.itemCount}</strong></div>
-        <div className="progress"><i style={{ width: `${progress}%` }} /></div>
-        <div className="mini-grid">
-          <div><span>Current deduction</span><strong>{gen(agreement.deductionWei)}</strong></div>
-          <div><span>Unresolved</span><strong>{agreement.unresolved} item</strong></div>
-        </div>
-        <button className="panel-link" onClick={onOpen}>Review evidence matrix <ArrowUpRight size={15} /></button>
-      </div>
-    </section>
-
-    <section className="page-width proof-strip">
-      <div><ShieldCheck /><span><b>Frozen inputs</b>Evidence hashes cannot change after funding.</span></div>
-      <div><ImageIcon /><span><b>Vision consensus</b>Validators independently inspect before/after images.</span></div>
-      <div><Gauge /><span><b>Bounded verdicts</b>The model cannot invent prices or recipients.</span></div>
-      <div><CircleDollarSign /><span><b>Deterministic payout</b>Frozen caps turn verdicts into exact deductions.</span></div>
-    </section>
-
-    <section className="page-width section-block">
-      <div className="section-heading"><div><span className="eyebrow">WHY BIDFRAME</span><h2>Judgment where code stops.<br />Code where judgment should stop.</h2></div><p>The contract gives AI one narrow job: describe the condition change inside a closed vocabulary. Everything economically sensitive remains deterministic.</p></div>
-      <div className="three-cards">
-        <article className="feature-card"><span className="icon-box"><Fingerprint /></span><h3>Evidence-bound</h3><p>Baseline and checkout media are pinned by SHA-256. Validators reject fetched bytes that do not match the sealed evidence.</p><span className="card-num">01</span></article>
-        <article className="feature-card"><span className="icon-box"><Scale /></span><h3>Consensus-classified</h3><p>UNCHANGED, NORMAL_WEAR, NEW_DAMAGE, MISSING or INCONCLUSIVE—plus a bounded severity bucket for new damage.</p><span className="card-num">02</span></article>
-        <article className="feature-card"><span className="icon-box"><FileCheck2 /></span><h3>Settlement-safe</h3><p>Normal wear is always zero. Damage deductions come only from the pre-agreed item schedule and can never exceed the locked deposit.</p><span className="card-num">03</span></article>
-      </div>
-    </section>
-
-    <section className="page-width architecture-card">
-      <div><span className="eyebrow light">SINGLE-CONTRACT ARCHITECTURE</span><h2>One state machine from deposit to settlement.</h2><p>No Bradbury dependency. No second vault contract. Bidframe holds the GEN deposit, stores immutable settlement terms, records evidence and releases the final amounts.</p></div>
-      <div className="state-flow"><span>DRAFT</span><i>→</i><span>ACTIVE</span><i>→</i><span>CHECKOUT</span><i>→</i><span>ASSESSING</span><i>→</i><span>READY</span><i>→</i><span>SETTLED</span></div>
-      <div className="arch-foot"><span><BadgeCheck size={16} /> Stable StudioNet</span><b>Chain ID 61999</b><span className={configured ? 'configured' : ''}>{configured ? 'Contract configured' : 'Awaiting deployment'}</span></div>
-    </section>
-  </>
+// Keep an immediate hash visible, then wait for the SDK's finalized receipt and verify execution success.
+async function submitAndTrack(client: WalletClient, functionName: string, args: unknown[], value: bigint, label: string, setTx: (state: TxState) => void) {
+  const { hash, finalized } = await submitContract(client, functionName, args, value)
+  setTx({ stage: 'finalizing', hash, message: `${label}: submitted; waiting for consensus finalization…` })
+  const receipt = await finalized
+  if (receipt.txExecutionResultName !== 'FINISHED_WITH_RETURN') throw new Error(`${label} finalized without successful contract execution.`)
+  return { hash, receipt, returnValue: receipt.data?.return_value ?? receipt.data?.result ?? receipt.data?.returnValue }
 }
 
-function CaseView({ progress }: { progress: number }) {
-  return <section className="page-width case-page">
-    <div className="case-title-row">
-      <div><button className="back-link">Settlement / Case #{agreement.id.toString().padStart(3, '0')}</button><h1>{agreement.title}</h1><p>{agreement.propertyRef} · landlord {agreement.landlord} · tenant {agreement.tenant}</p></div>
-      <div className="case-title-actions"><StatusPill>ASSESSING</StatusPill><button className="secondary-btn">Copy case link</button></div>
-    </div>
-
-    <div className="metric-grid">
-      <Metric icon={<LockKeyhole />} label="Deposit locked" value={gen(agreement.depositWei)} sub="100% funded" />
-      <Metric icon={<Scale />} label="Current deduction" value={gen(agreement.deductionWei)} sub="bounded by frozen schedule" />
-      <Metric icon={<BadgeCheck />} label="Assessed" value={`${agreement.assessed}/${agreement.itemCount}`} sub={`${progress}% complete`} />
-      <Metric icon={<ShieldCheck />} label="Unresolved" value={`${agreement.unresolved}`} sub="fails closed" />
-    </div>
-
-    <div className="case-grid">
-      <div className="evidence-card">
-        <div className="card-head"><div><span className="eyebrow">EVIDENCE MATRIX</span><h2>Registered inventory</h2></div><span className="hash-chip">Terms 6b92…107e</span></div>
-        <div className="table-wrap"><table><thead><tr><th>Item</th><th>Evidence</th><th>Consensus</th><th>Deduction</th></tr></thead><tbody>
-          {items.map(item => <tr key={item.id}>
-            <td><strong>{item.name}</strong><span>{item.description}</span></td>
-            <td><span className="evidence-line"><Fingerprint size={13} /> in {item.baselineHash}</span><span className="evidence-line muted"><Fingerprint size={13} /> out {item.checkoutHash || 'not submitted'}</span></td>
-            <td>{item.verdict ? <StatusPill tone={verdictTone(item.verdict)}>{item.verdict.replace('_', ' ')}</StatusPill> : <StatusPill tone={item.status === 'Ready' ? 'purple' : 'slate'}>{item.status}</StatusPill>}</td>
-            <td><strong>{item.deductionWei !== undefined ? gen(item.deductionWei) : '—'}</strong>{item.severity ? <span>severity {item.severity}/3</span> : null}</td>
-          </tr>)}
-        </tbody></table></div>
-      </div>
-      <aside className="settlement-card">
-        <span className="eyebrow">PROJECTED SETTLEMENT</span><h3>{gen(agreement.depositWei - agreement.deductionWei)}</h3><p>currently refundable to tenant</p>
-        <div className="settlement-bar"><i style={{ width: '84%' }} /></div>
-        <dl><div><dt>Deposit</dt><dd>{gen(agreement.depositWei)}</dd></div><div><dt>Deductions</dt><dd>− {gen(agreement.deductionWei)}</dd></div><div className="total"><dt>Refund</dt><dd>{gen(agreement.depositWei - agreement.deductionWei)}</dd></div></dl>
-        <div className="notice"><ShieldCheck size={17} /><p><b>Settlement is still locked.</b> Every inventory item must resolve before the contract can release funds.</p></div>
-        <button className="primary-btn wide" disabled>Settle after consensus</button>
-      </aside>
-    </div>
-  </section>
+function Overview({ agreement, progress, onOpen, onLoad }: { agreement: Agreement | null; progress: number; onOpen: () => void; onLoad: (id: string) => void }) {
+  const [id, setId] = useState('')
+  return <><section className="hero page-width"><div className="hero-copy"><StatusPill>Consensus security-deposit settlement</StatusPill><h1>Physical condition,<br /><span>settled by evidence.</span></h1><p>Bidframe binds move-in evidence, deduction caps and deposit funds before checkout. GenLayer validators classify the condition change; deterministic contract logic calculates the money.</p><div className="hero-actions"><button className="primary-btn" onClick={onOpen}>Open settlement case <ChevronRight size={17} /></button><a className="text-link" href="https://docs.genlayer.com/developers/intelligent-contracts/features/image-processing" target="_blank" rel="noreferrer">How consensus sees evidence <ArrowUpRight size={14} /></a></div></div>
+    <div className="hero-panel"><div className="hero-panel-top"><div><span className="eyebrow">LIVE STUDIO CONTRACT</span><h3>{agreement?.title || 'No agreement loaded'}</h3></div><StatusPill tone={agreement ? 'purple' : 'slate'}>{agreement?.status || 'Live reads only'}</StatusPill></div>{agreement ? <><div className="lock-visual"><LockKeyhole size={29} /><div><strong>{gen(agreement.deposit_wei)}</strong><span>deposit state from contract</span></div></div><div className="progress-head"><span>Evidence assessment</span><strong>{agreement.assessed_count}/{agreement.item_count}</strong></div><div className="progress"><i style={{ width: `${progress}%` }} /></div><div className="mini-grid"><div><span>Deduction</span><strong>{gen(agreement.settlement_deduction_wei)}</strong></div><div><span>Refund</span><strong>{gen(agreement.projected_refund_wei)}</strong></div></div></> : <p className="empty-copy">Enter an agreement ID to read the current on-chain state.</p>}<form className="load-case" onSubmit={e => { e.preventDefault(); if (id) onLoad(id) }}><input aria-label="Agreement ID" type="number" min="1" placeholder="Agreement ID" value={id} onChange={e => setId(e.target.value)} /><button className="panel-link">Load case <ArrowUpRight size={15} /></button></form></div></section>
+    <section className="page-width proof-strip"><div><ShieldCheck /><span><b>Frozen inputs</b>Evidence hashes and rules cannot change after funding.</span></div><div><ImageIcon /><span><b>Vision consensus</b>Validators inspect before and after images.</span></div><div><Gauge /><span><b>Bounded verdicts</b>The model cannot invent prices or recipients.</span></div><div><CircleDollarSign /><span><b>Deterministic payout</b>Frozen caps determine each deduction.</span></div></section>
+    <section className="page-width section-block"><div className="section-heading"><div><span className="eyebrow">WHY BIDFRAME</span><h2>Judgment where code stops.<br />Code where judgment should stop.</h2></div><p>The contract gives AI one narrow job: classify condition change inside a closed vocabulary. Everything economically sensitive remains deterministic.</p></div><div className="three-cards"><Feature icon={<Fingerprint />} title="Evidence-bound">Baseline and checkout media are pinned by SHA-256 and checked before assessment.</Feature><Feature icon={<Scale />} title="Consensus-classified">UNCHANGED, NORMAL_WEAR, NEW_DAMAGE, MISSING or INCONCLUSIVE.</Feature><Feature icon={<FileCheck2 />} title="Settlement-safe">Normal wear is zero. Frozen caps set damage deductions, bounded by the deposit.</Feature></div></section>
+    <section className="page-width architecture-card"><div><span className="eyebrow light">SINGLE-CONTRACT ARCHITECTURE</span><h2>One state machine from deposit to settlement.</h2><p>The same Intelligent Contract holds GEN, stores frozen rules, records evidence and releases the final amounts.</p></div><div className="state-flow"><span>DRAFT</span><i>→</i><span>ACTIVE</span><i>→</i><span>CHECKOUT</span><i>→</i><span>ASSESSING</span><i>→</i><span>READY</span><i>→</i><span>SETTLED</span></div><div className="arch-foot"><span><BadgeCheck size={16} /> Stable StudioNet</span><b>Chain ID 61999</b>{isContractConfigured() && <a href={explorerAddress(CONTRACT_ADDRESS)} target="_blank" rel="noreferrer">View deployed contract ↗</a>}</div></section></>
 }
+function Feature({ icon, title, children }: { icon: React.ReactNode; title: string; children: string }) { return <article className="feature-card"><span className="icon-box">{icon}</span><h3>{title}</h3><p>{children}</p></article> }
 
-function Metric({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) {
-  return <div className="metric"><span className="metric-icon">{icon}</span><div><p>{label}</p><strong>{value}</strong><span>{sub}</span></div></div>
+function CaseView({ agreement, items, id, setId, loading, refresh, transact, wallet, settled }: { agreement: Agreement | null; items: Item[]; id: string; setId: (v: string) => void; loading: boolean; refresh: (id?: string) => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string } | undefined>; wallet: string; settled: boolean }) {
+  const [loadId, setLoadId] = useState(id); const [evidence, setEvidence] = useState<Record<number, { url: string; hash: string }>>({}); const [replacement, setReplacement] = useState<Record<number, { url: string; hash: string }>>({})
+  const setEvidenceHash = async (itemId: number, field: 'evidence' | 'replacement', file?: File) => { if (!file) return; const hash = await hashFile(file); (field === 'evidence' ? setEvidence : setReplacement)(state => ({ ...state, [itemId]: { ...state[itemId], hash } })) }
+  const ready = Boolean(agreement && agreement.item_count > 0 && agreement.assessed_count === agreement.item_count && !agreement.has_inconclusive)
+  return <section className="page-width case-page"><div className="case-title-row"><div><span className="eyebrow">CONTRACT READS · STUDIO 61999</span><h1>{agreement?.title || 'Settlement case'}</h1><p>{agreement ? `${agreement.property_ref} · landlord ${agreement.landlord} · tenant ${agreement.tenant}` : 'Load an agreement by its on-chain ID.'}</p></div><form className="case-load" onSubmit={e => { e.preventDefault(); setId(loadId); refresh(loadId) }}><input type="number" min="1" placeholder="Agreement ID" value={loadId} onChange={e => setLoadId(e.target.value)} /><button className="secondary-btn">Load</button></form></div>
+    {!agreement ? <div className="empty-state">{loading ? 'Reading StudioNet…' : 'No agreement loaded. Enter its ID above or create a new agreement.'}</div> : <>
+      <div className="metric-grid"><Metric icon={<LockKeyhole />} label="Deposit" value={gen(agreement.deposit_wei)} sub={agreement.status} /><Metric icon={<Scale />} label="Current deduction" value={gen(agreement.settlement_deduction_wei)} sub="from frozen schedule" /><Metric icon={<BadgeCheck />} label="Assessed" value={`${agreement.assessed_count}/${agreement.item_count}`} sub={`${Math.round(agreement.assessed_count / Math.max(agreement.item_count, 1) * 100)}% complete`} /><Metric icon={<ShieldCheck />} label="Tenant refund" value={gen(agreement.projected_refund_wei)} sub={agreement.has_inconclusive ? 'INCONCLUSIVE · settlement blocked' : 'deterministic projection'} /></div>
+      <div className="lifecycle-actions">{agreement.status === 'DRAFT' && wallet.toLowerCase() === agreement.tenant.toLowerCase() && <button className="primary-btn" onClick={() => void transact('Fund exact deposit', 'fund_agreement', [BigInt(id)], amount(agreement.deposit_wei))}>Fund exact deposit · {gen(agreement.deposit_wei)}</button>}{agreement.status === 'ACTIVE' && <button className="secondary-btn" onClick={() => void transact('Open checkout', 'open_checkout', [BigInt(id)])}>Open checkout</button>}{agreement.status === 'ASSESSING' && <button className="primary-btn" disabled={!ready} title={!ready ? 'Every item must be assessed and none may be INCONCLUSIVE.' : ''} onClick={() => void transact('Mark READY', 'mark_ready', [BigInt(id)])}>Mark READY</button>}{agreement.status === 'READY' && <button className="primary-btn" onClick={() => void transact('Settle', 'settle', [BigInt(id)])}>Settle agreement</button>}{settled && <StatusPill tone="green">Settled · deduction {gen(agreement.settlement_deduction_wei)} · refund {gen(agreement.projected_refund_wei)}</StatusPill>}{loading && <span>Refreshing contract state…</span>}</div>
+      <div className="case-grid"><div className="evidence-card"><div className="card-head"><div><span className="eyebrow">EVIDENCE MATRIX</span><h2>Registered inventory</h2></div><span className="hash-chip">Terms {agreement.terms_hash.slice(0, 10)}…</span></div>{items.length === 0 ? <p className="empty-copy">No inventory items have been registered.</p> : items.map(item => <ItemCard key={item.id} item={item} agreement={agreement} wallet={wallet} evidence={evidence[item.id] || { url: '', hash: '' }} replacement={replacement[item.id] || { url: '', hash: '' }} setEvidence={value => setEvidence(s => ({ ...s, [item.id]: value }))} setReplacement={value => setReplacement(s => ({ ...s, [item.id]: value }))} setEvidenceHash={file => void setEvidenceHash(item.id, 'evidence', file)} setReplacementHash={file => void setEvidenceHash(item.id, 'replacement', file)} transact={(label, fn, args) => void transact(label, fn, args)} />)}</div><aside className="settlement-card"><span className="eyebrow">{settled ? 'FINAL SETTLEMENT' : 'PROJECTED SETTLEMENT'}</span><h3>{gen(agreement.projected_refund_wei)}</h3><p>{settled ? 'refunded to tenant' : 'projected tenant refund'}</p><div className="settlement-bar"><i style={{ width: `${Math.min(100, Number(amount(agreement.settlement_deduction_wei) * 100n / (amount(agreement.deposit_wei) || 1n)))}%` }} /></div><dl><div><dt>Deposit</dt><dd>{gen(agreement.deposit_wei)}</dd></div><div><dt>Landlord deduction</dt><dd>− {gen(agreement.settlement_deduction_wei)}</dd></div><div className="total"><dt>Tenant refund</dt><dd>{gen(agreement.projected_refund_wei)}</dd></div></dl><div className="notice"><ShieldCheck size={17} /><p><b>{agreement.has_inconclusive ? 'Automatic settlement blocked.' : ready || settled ? 'All evidence resolved.' : 'Settlement remains locked.'}</b> {!ready && !settled && 'Every item must be assessed and no item may be INCONCLUSIVE.'}</p></div></aside></div>
+    </>}</section>
 }
+function ItemCard({ item, agreement, wallet, evidence, replacement, setEvidence, setReplacement, setEvidenceHash, setReplacementHash, transact }: { item: Item; agreement: Agreement; wallet: string; evidence: { url: string; hash: string }; replacement: { url: string; hash: string }; setEvidence: (v: { url: string; hash: string }) => void; setReplacement: (v: { url: string; hash: string }) => void; setEvidenceHash: (f?: File) => void; setReplacementHash: (f?: File) => void; transact: (label: string, fn: string, args: unknown[]) => void }) {
+  const counterparty = wallet.toLowerCase() !== item.checkout_submitter?.toLowerCase()
+  return <article className="item-card"><div className="item-card-title"><div><h3>{item.id}. {item.label}</h3><p>{item.description}</p></div>{item.assessed ? <StatusPill tone={verdictTone(item.verdict)}>{item.verdict}</StatusPill> : <StatusPill tone={item.evidence_challenged ? 'amber' : 'slate'}>{item.evidence_challenged ? 'CHALLENGED' : item.checkout_url ? 'EVIDENCE SUBMITTED' : 'AWAITING EVIDENCE'}</StatusPill>}</div><div className="hash-row"><span><Fingerprint size={13} /> Move-in {item.baseline_sha256.slice(0, 14)}…</span><span><Fingerprint size={13} /> Move-out {item.checkout_sha256 ? `${item.checkout_sha256.slice(0, 14)}…` : 'not submitted'}</span></div>{item.assessed && <div className="verdict-detail"><b>{item.verdict} · severity {item.severity}/3 · deduction {gen(item.deduction_wei)}</b><p>{item.reasoning || 'No reasoning was returned.'}</p></div>}
+    {agreement.status === 'CHECKOUT' || agreement.status === 'ASSESSING' ? <div className="item-controls">{!item.checkout_url && !item.assessed && <><label>Move-out evidence URL<input type="url" placeholder="https://…" value={evidence.url} onChange={e => setEvidence({ ...evidence, url: e.target.value })} /></label><label>Evidence file for SHA-256<input type="file" accept="image/*" onChange={e => setEvidenceHash(e.target.files?.[0])} /></label>{evidence.hash && <code>SHA-256 {evidence.hash}</code>}<button className="secondary-btn" disabled={!evidence.url || !evidence.hash} onClick={() => transact('Submit evidence', 'submit_checkout_evidence', [BigInt(agreement.id), BigInt(item.id), evidence.url, evidence.hash])}>Submit move-out evidence</button></>}{item.checkout_url && !item.assessed && <div className="item-button-row"><button className="secondary-btn" disabled={!counterparty || item.evidence_challenged} title={!counterparty ? 'Only the counterparty can challenge submitted evidence.' : ''} onClick={() => transact('Challenge evidence', 'challenge_checkout_evidence', [BigInt(agreement.id), BigInt(item.id)])}>Challenge evidence</button>{item.evidence_challenged && <><label>Replacement URL<input type="url" placeholder="https://…" value={replacement.url} onChange={e => setReplacement({ ...replacement, url: e.target.value })} /></label><label>Replacement image<input type="file" accept="image/*" onChange={e => setReplacementHash(e.target.files?.[0])} /></label>{replacement.hash && <code>SHA-256 {replacement.hash}</code>}<button className="secondary-btn" disabled={!replacement.url || !replacement.hash} onClick={() => transact('Propose replacement', 'propose_replacement_evidence', [BigInt(agreement.id), BigInt(item.id), replacement.url, replacement.hash])}>Propose replacement</button><button className="secondary-btn" onClick={() => transact('Accept replacement', 'accept_replacement_evidence', [BigInt(agreement.id), BigInt(item.id)])}>Accept replacement</button></>}{!item.evidence_challenged && <button className="primary-btn" onClick={() => transact('Assess item', 'assess_item', [BigInt(agreement.id), BigInt(item.id)])}>Run consensus assessment</button>}</div>}</div> : null}
+    <div className="schedule-line">Frozen caps · minor {gen(item.minor_wei)} · moderate {gen(item.moderate_wei)} · severe {gen(item.severe_wei)} · missing {gen(item.missing_wei)}</div></article>
+}
+function Metric({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) { return <div className="metric"><span className="metric-icon">{icon}</span><div><p>{label}</p><strong>{value}</strong><span>{sub}</span></div></div> }
 
-function CreateView({ connected, onConnect }: { connected: boolean; onConnect: () => void }) {
-  const [step, setStep] = useState(1)
-  return <section className="page-width create-page">
-    <div className="create-intro"><StatusPill>Create agreement</StatusPill><h1>Freeze the rules before<br />the deposit moves.</h1><p>A Bidframe agreement is intentionally difficult to mutate after funding. Register the parties, deposit, evidence policy and item-specific deduction caps first.</p></div>
-    <div className="create-layout">
-      <ol className="steps">
-        {['Agreement', 'Inventory', 'Review & fund'].map((label, i) => <li key={label} className={step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}><span>{step > i + 1 ? '✓' : i + 1}</span><div><b>{label}</b><small>{i === 0 ? 'Parties & deposit' : i === 1 ? 'Evidence & caps' : 'Seal immutable terms'}</small></div></li>)}
-      </ol>
-      <div className="form-card">
-        {step === 1 && <>
-          <div className="form-head"><div><span className="eyebrow">STEP 01</span><h2>Agreement details</h2></div><Building2 /></div>
-          <label>Agreement title<input defaultValue="Atlas Lofts · Unit 4B" /></label>
-          <div className="two-col"><label>Property reference<input defaultValue="LAG-ATL-4B-0926" /></label><label>Deposit (GEN)<input type="number" defaultValue="3.5" step="0.1" /></label></div>
-          <label>Tenant wallet<input placeholder="0x…" /></label>
-          <label>Terms hash<input placeholder="SHA-256 of signed lease / deposit schedule" /></label>
-          <div className="form-note"><LockKeyhole size={16} />Terms, parties and deposit value become immutable once funded.</div>
-        </>}
-        {step === 2 && <>
-          <div className="form-head"><div><span className="eyebrow">STEP 02</span><h2>Register inventory</h2></div><ImageIcon /></div>
-          <label>Item label<input defaultValue="Kitchen worktop" /></label>
-          <label>Baseline evidence URL<input placeholder="https://…/move-in.jpg" /></label>
-          <label>Baseline SHA-256<input placeholder="64 hex characters" /></label>
-          <div className="four-col"><label>Minor<input type="number" placeholder="GEN" /></label><label>Moderate<input type="number" placeholder="GEN" /></label><label>Severe<input type="number" placeholder="GEN" /></label><label>Missing<input type="number" placeholder="GEN" /></label></div>
-          <div className="form-note"><ShieldCheck size={16} />Normal wear and unchanged condition always deduct zero, regardless of the schedule.</div>
-        </>}
-        {step === 3 && <>
-          <div className="form-head"><div><span className="eyebrow">STEP 03</span><h2>Review & seal</h2></div><FileCheck2 /></div>
-          <div className="review-box"><div><span>Deposit</span><strong>3.50 GEN</strong></div><div><span>Inventory</span><strong>5 items</strong></div><div><span>Network</span><strong>StudioNet · 61999</strong></div><div><span>Contract</span><strong>Single IC</strong></div></div>
-          <div className="hash-preview"><Fingerprint size={17} /><div><span>Definition hash preview</span><code>6b92d39d1b07…b743107e</code></div></div>
-          {!connected ? <button className="primary-btn wide" onClick={onConnect}><Wallet size={17} /> Connect wallet to continue</button> : <button className="primary-btn wide" disabled={!isContractConfigured()}>{isContractConfigured() ? 'Create on StudioNet' : 'Deploy contract before writing'}</button>}
-        </>}
-        <div className="form-actions"><button className="secondary-btn" disabled={step === 1} onClick={() => setStep(s => Math.max(1, s - 1))}>Back</button>{step < 3 && <button className="primary-btn" onClick={() => setStep(s => Math.min(3, s + 1))}>Continue <ChevronRight size={16} /></button>}</div>
-      </div>
-    </div>
-  </section>
+function CreateView({ connected, wallet, connect, transact, setAgreementId, refresh, setActive }: { connected: boolean; wallet: string; connect: () => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string; returnValue?: unknown } | undefined>; setAgreementId: (id: string) => void; refresh: (id?: string) => Promise<void>; setActive: (v: 'overview' | 'case' | 'create') => void }) {
+  const [step, setStep] = useState(1); const [title, setTitle] = useState(''); const [property, setProperty] = useState(''); const [tenant, setTenant] = useState(''); const [deposit, setDeposit] = useState(''); const [termsHash, setTermsHash] = useState(''); const [items, setItems] = useState([{ ...emptyItem }]); const [createdId, setCreatedId] = useState('')
+  function update(index: number, key: keyof typeof emptyItem, value: string) { setItems(rows => rows.map((row, i) => i === index ? { ...row, [key]: value } : row)) }
+  async function addCurrentItem() { if (!createdId) return; try { const row = items[items.length - 1]; const result = await transact(`Register inventory item ${items.length}`, 'add_item', [BigInt(createdId), row.label, row.description, row.baselineUrl, row.baselineHash, genWei(row.minor || '0'), genWei(row.moderate || '0'), genWei(row.severe || '0'), genWei(row.missing || '0')], 0n, createdId); if (result) setItems(prev => [...prev, { ...emptyItem }]) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Check GEN values and try again.') } }
+  const [createHint, setCreateHint] = useState('')
+  async function createAndCapture() { try { const depositWei = genWei(deposit); if (depositWei <= 0n) throw new Error('Deposit must be greater than zero.'); const res = await transact('Create agreement', 'create_agreement', [title, property, tenant, depositWei, termsHash]); if (!res) return; try { const id = String(await readContract<number>('get_latest_agreement_for_landlord', [wallet])); setCreatedId(id); setAgreementId(id); setCreateHint(`Agreement #${id} finalized. Register each inventory item, then ask the tenant to connect their wallet and fund the exact deposit.`) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Agreement finalized. Load its ID using the transaction details.') } } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Enter a valid deposit amount.') } }
+  return <section className="page-width create-page"><div className="create-intro"><StatusPill>Create agreement</StatusPill><h1>Freeze the rules before<br />the deposit moves.</h1><p>Register parties, evidence and item-specific caps first. Funding locks the schedule so later condition judgments cannot change the money.</p></div><div className="create-layout"><ol className="steps">{['Agreement', 'Inventory', 'Fund & checkout'].map((label, i) => <li key={label} className={step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}><span>{step > i + 1 ? '✓' : i + 1}</span><div><b>{label}</b><small>{i === 0 ? 'Parties & deposit' : i === 1 ? 'Evidence & frozen caps' : 'Tenant funds exact amount'}</small></div></li>)}</ol><div className="form-card">
+    {step === 1 && <><div className="form-head"><div><span className="eyebrow">STEP 01</span><h2>Agreement details</h2></div><Building2 /></div><label>Agreement title<input value={title} onChange={e => setTitle(e.target.value)} /></label><div className="two-col"><label>Property reference<input value={property} onChange={e => setProperty(e.target.value)} /></label><label>Deposit (GEN)<input type="number" min="0.000000000000000001" step="0.000000000000000001" value={deposit} onChange={e => setDeposit(e.target.value)} /></label></div><label>Tenant wallet<input placeholder="0x…" value={tenant} onChange={e => setTenant(e.target.value)} /></label><label>Frozen terms SHA-256<input placeholder="64 hex characters" value={termsHash} onChange={e => setTermsHash(e.target.value)} /></label><div className="form-note"><LockKeyhole size={16} />Terms and deposit become immutable when the tenant funds.</div></>}
+    {step === 2 && <><div className="form-head"><div><span className="eyebrow">STEP 02</span><h2>Register inventory</h2></div><ImageIcon /></div>{items.map((item, i) => <div className="inventory-form" key={i}><h3>Item {i + 1}</h3><label>Item label<input value={item.label} onChange={e => update(i, 'label', e.target.value)} /></label><label>Description<input value={item.description} onChange={e => update(i, 'description', e.target.value)} /></label><label>Baseline HTTPS evidence URL<input type="url" value={item.baselineUrl} onChange={e => update(i, 'baselineUrl', e.target.value)} /></label><label>Baseline image file for SHA-256<input type="file" accept="image/*" onChange={async e => { const f = e.target.files?.[0]; if (f) update(i, 'baselineHash', await hashFile(f)) }} /></label><label>Baseline SHA-256<input value={item.baselineHash} onChange={e => update(i, 'baselineHash', e.target.value)} /></label><div className="four-col">{(['minor', 'moderate', 'severe', 'missing'] as const).map(k => <label key={k}>{k}<input type="number" min="0" step="any" value={item[k]} onChange={e => update(i, k, e.target.value)} /></label>)}</div><div className="form-note"><ShieldCheck size={16} />The values above are frozen GEN caps. Ordinary wear and unchanged condition always deduct zero.</div></div>)}</>}
+    {step === 3 && <><div className="form-head"><div><span className="eyebrow">STEP 03</span><h2>Finalize agreement</h2></div><FileCheck2 /></div><div className="review-box"><div><span>Deposit</span><strong>{deposit || '—'} GEN</strong></div><div><span>Inventory ready</span><strong>{items.length - (createdId ? 1 : 0)} items</strong></div><div><span>Network</span><strong>StudioNet · 61999</strong></div><div><span>Contract</span><strong>One Intelligent Contract</strong></div></div>{!connected ? <button className="primary-btn wide" onClick={connect}><Wallet size={17} /> Connect landlord wallet</button> : !createdId ? <button className="primary-btn wide" disabled={!isContractConfigured() || !title || !property || !tenant || !deposit || !/^[a-fA-F0-9]{64}$/.test(termsHash)} onClick={() => void createAndCapture()}>Create agreement on StudioNet</button> : <><p>{createHint}</p><button className="primary-btn wide" onClick={() => void addCurrentItem()} disabled={!items[items.length - 1].label || !items[items.length - 1].baselineHash}>Register item {items.length} on StudioNet</button><button className="secondary-btn wide" onClick={() => { setAgreementId(createdId); void refresh(createdId); setActive('case') }}>Open agreement case</button></>}</>}
+    <div className="form-actions"><button className="secondary-btn" disabled={step === 1} onClick={() => setStep(s => Math.max(1, s - 1))}>Back</button>{step < 3 && <button className="primary-btn" disabled={step === 1 && (!title || !property || !tenant || !deposit || !/^[a-fA-F0-9]{64}$/.test(termsHash))} onClick={() => setStep(s => Math.min(3, s + 1))}>Continue <ChevronRight size={16} /></button>}</div>
+    </div></div></section>
 }
