@@ -1,6 +1,6 @@
 import { createClient } from 'genlayer-js'
 import { studionet } from 'genlayer-js/chains'
-import { ExecutionResult, TransactionStatus } from 'genlayer-js/types'
+import { TransactionStatus } from 'genlayer-js/types'
 
 export const CHAIN_ID = 61999
 export const EXPLORER_BASE = import.meta.env.VITE_EXPLORER_BASE || 'https://explorer-studio.genlayer.com'
@@ -43,13 +43,32 @@ export async function writeContract(client: WalletClient, functionName: string, 
   if (!isContractConfigured()) throw new Error('The canonical Bidframe contract address is not configured yet.')
   const hash = await client.writeContract({ address: CONTRACT_ADDRESS as `0x${string}`, functionName, args: args as never[], value })
   const receipt = await readClient.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, interval: 3000 })
-  if (receipt.txExecutionResultName !== ExecutionResult.FINISHED_WITH_RETURN) {
-    const tx = await readClient.getTransaction({ hash })
-    const detail = (tx as { data?: { error?: string }; txDataDecoded?: { error?: string } }).data?.error
-      ?? (tx as { txDataDecoded?: { error?: string } }).txDataDecoded?.error
-    throw new Error(`Transaction finalized without successful execution${detail ? `: ${detail}` : '.'}`)
-  }
+  await assertSuccessfulFinalizedTransaction(String(hash), receipt)
   return { hash: String(hash), receipt }
+}
+
+// The StudioNet JSON-RPC response exposes finality and execution under statusName,
+// result_name, and consensus_data.leader_receipt. genlayer-js 1.1.x does not
+// populate txExecutionResultName for this response shape.
+export async function assertSuccessfulFinalizedTransaction(hash: string, receipt: unknown) {
+  const tx = await readClient.getTransaction({ hash: hash as `0x${string}` & { length: 66 } }) as unknown as {
+    statusName?: string
+    status?: number
+    result_name?: string
+    consensus_data?: { leader_receipt?: Array<{ mode?: string; execution_result?: string; result?: { status?: string } }> }
+  }
+  const receiptStatus = receipt as { statusName?: string; status?: number }
+  const finalized = tx.statusName === 'FINALIZED' || receiptStatus.statusName === 'FINALIZED' || tx.status === 7 || receiptStatus.status === 7
+  const leader = tx.consensus_data?.leader_receipt?.find(row => row.mode === 'leader') ?? tx.consensus_data?.leader_receipt?.[0]
+  const succeeded = finalized
+    && tx.result_name === 'MAJORITY_AGREE'
+    && leader?.execution_result === 'SUCCESS'
+    && leader.result?.status === 'return'
+  if (!succeeded) {
+    const detail = `status=${tx.statusName ?? receiptStatus.statusName ?? tx.status ?? receiptStatus.status ?? 'unknown'}, consensus=${tx.result_name ?? 'unknown'}, execution=${leader?.execution_result ?? 'unknown'}, return=${leader?.result?.status ?? 'unknown'}`
+    throw new Error(`Transaction did not finalize with successful contract execution (${detail}).`)
+  }
+  return tx
 }
 
 export async function submitContract(client: WalletClient, functionName: string, args: unknown[] = [], value = 0n) {

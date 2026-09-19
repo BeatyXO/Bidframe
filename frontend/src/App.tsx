@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, BadgeCheck, Building2, ChevronRight, CircleDollarSign, FileCheck2, Fingerprint, Gauge, Image as ImageIcon, LockKeyhole, Menu, Scale, ShieldCheck, Wallet, X } from 'lucide-react'
 import { StatusPill } from './components/StatusPill'
-import { CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
+import { assertSuccessfulFinalizedTransaction, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
 
 type Agreement = { id: number; title: string; property_ref: string; terms_hash: string; status: string; landlord: string; tenant: string; deposit_wei: bigint | string; item_count: number; assessed_count: number; raw_deduction_wei: bigint | string; settlement_deduction_wei: bigint | string; projected_refund_wei: bigint | string; has_inconclusive: boolean; inconclusive_count: number }
 type Item = { id: number; label: string; description: string; baseline_url: string; baseline_sha256: string; checkout_url: string; checkout_sha256: string; checkout_submitter: string; evidence_challenged: boolean; replacement_url: string; replacement_proposer: string; assessed: boolean; verdict: string; severity: number; deduction_wei: bigint | string; reasoning: string; inconclusive_resolved: boolean; minor_wei: bigint | string; moderate_wei: bigint | string; severe_wei: bigint | string; missing_wei: bigint | string }
@@ -76,7 +76,7 @@ async function submitAndTrack(client: WalletClient, functionName: string, args: 
   const { hash, finalized } = await submitContract(client, functionName, args, value)
   setTx({ stage: 'finalizing', hash, message: `${label}: submitted; waiting for consensus finalization…` })
   const receipt = await finalized
-  if (receipt.txExecutionResultName !== 'FINISHED_WITH_RETURN') throw new Error(`${label} finalized without successful contract execution.`)
+  await assertSuccessfulFinalizedTransaction(hash, receipt)
   return { hash, receipt, returnValue: receipt.data?.return_value ?? receipt.data?.result ?? receipt.data?.returnValue }
 }
 
