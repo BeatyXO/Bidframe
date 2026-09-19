@@ -125,6 +125,8 @@ def test_evidence_is_write_once_and_challenge_requires_counterparty(direct_vm, d
         contract.challenge_checkout_evidence(agreement_id, 1)
     with direct_vm.prank(direct_bob):
         contract.challenge_checkout_evidence(agreement_id, 1)
+        with direct_vm.expect_revert("Resolve the evidence challenge"):
+            contract.assess_item(agreement_id, 1)
     item = contract.get_item(agreement_id, 1)
     assert item["evidence_challenged"] is True
 
@@ -232,7 +234,7 @@ def test_inconclusive_recovery_rejects_conclusive_item(direct_vm, direct_deploy,
         contract.resolve_inconclusive_zero(agreement_id, 1)
 
 
-def test_challenge_cannot_permanently_block_assessment(direct_vm, direct_deploy, direct_alice, direct_bob):
+def test_challenge_cannot_permanently_lock_deposit(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy(CONTRACT)
     before_hash = hashlib.sha256(BEFORE).hexdigest()
     after_hash = hashlib.sha256(AFTER).hexdigest()
@@ -247,14 +249,22 @@ def test_challenge_cannot_permanently_block_assessment(direct_vm, direct_deploy,
     direct_vm.sender = direct_bob
     contract.challenge_checkout_evidence(agreement_id, 1)
 
-    direct_vm.mock_web(r"evidence\.example/before\.jpg", {"status": 200, "body": BEFORE})
-    direct_vm.mock_web(r"evidence\.example/after\.jpg", {"status": 200, "body": AFTER})
-    direct_vm.mock_llm(r"security-deposit settlement", json.dumps({"verdict": "UNCHANGED", "severity": 0, "reasoning": "No meaningful deterioration."}))
-    contract.assess_item(agreement_id, 1)
+    with direct_vm.expect_revert("Resolve the evidence challenge"):
+        contract.assess_item(agreement_id, 1)
 
+    contract.resolve_challenged_zero(agreement_id, 1)
     item = contract.get_item(agreement_id, 1)
+    agreement = contract.get_agreement(agreement_id)
+
     assert item["assessed"] is True
-    assert item["verdict"] == "UNCHANGED"
+    assert item["verdict"] == "INCONCLUSIVE"
+    assert item["deduction_wei"] == 0
+    assert item["inconclusive_resolved"] is True
+    assert agreement["has_inconclusive"] is False
+    assert agreement["assessed_count"] == 1
+
+    contract.mark_ready(agreement_id)
+    assert contract.get_agreement(agreement_id)["status"] == "READY"
 
 def test_bad_hash_and_unavailable_evidence_fail_closed(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy(CONTRACT)
