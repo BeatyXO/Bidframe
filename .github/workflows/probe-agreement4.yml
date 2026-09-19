@@ -34,17 +34,23 @@ jobs:
           NODE
       - name: Query explorer transactions for canonical contract
         run: |
-          python - <<'PY'
-          import json, urllib.request
-          base='https://studio.genlayer.com/api/explorer/transactions'
-          addr='0x3f5F81618cc86604f7094E525F46f37363CD99a7'
-          for query in [f'?address={addr}&limit=100&page=1', f'?search={addr}&limit=100&page=1']:
-              url=base+query
-              print('EXPLORER_URL='+url)
-              try:
-                  with urllib.request.urlopen(url, timeout=30) as r:
-                      data=json.load(r)
-                  print(json.dumps(data, sort_keys=True))
-              except Exception as e:
-                  print('EXPLORER_ERROR='+repr(e))
-          PY
+          node --input-type=module <<'NODE'
+          const addr='0x3f5F81618cc86604f7094E525F46f37363CD99a7'
+          const urls=[
+            `https://explorer-studio.genlayer.com/api/transactions?address=${addr}&limit=100&page=1`,
+            `https://explorer-studio.genlayer.com/api/transactions?search=${addr}&limit=100&page=1`,
+            `https://studio.genlayer.com/api/explorer/transactions?address=${addr}&limit=100&page=1`,
+          ]
+          for (const url of urls) {
+            console.log('EXPLORER_URL='+url)
+            try {
+              const res=await fetch(url,{headers:{
+                'accept':'application/json,text/plain,*/*',
+                'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153 Safari/537.36',
+                'referer':'https://explorer-studio.genlayer.com/txs'
+              }})
+              console.log('STATUS='+res.status)
+              console.log((await res.text()).slice(0,60000))
+            } catch (e) { console.log('EXPLORER_ERROR='+String(e)) }
+          }
+          NODE
