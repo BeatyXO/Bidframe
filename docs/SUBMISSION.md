@@ -15,6 +15,13 @@
 
 An earlier saved code-query output was stale and did not represent the canonical address. The parity result above comes from a fresh direct query of the canonical address.
 
+## Final repository hardening
+
+- Wallet/CI/documentation hardening merge: `248836c516457ada6bd8b2426de96caf4c2d3545`
+- GitHub Actions Quality run: [35449480448](https://github.com/BeatyXO/Bidframe/actions/runs/35449480448) — **PASS**
+- Contract source was not changed by the wallet hardening, so the canonical deployment/source-parity record below remains valid.
+- The live production URL is [https://bidframe-seven.vercel.app/](https://bidframe-seven.vercel.app/).
+
 ## Local validation
 
 - GenVM lint: **PASS**, `genvm-lint check contracts/Bidframe.py` (set `PYTHONIOENCODING=utf-8` on Windows so the checkmark output is printable).
