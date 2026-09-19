@@ -6,7 +6,7 @@ This file distinguishes historical deployment evidence from the current audited 
 
 - Repository: `BeatyXO/Bidframe`
 - Audit base before fixes: `abb905ba9265bc3b1988c332c7a777cc73691005`
-- Current branch during remediation: `fix/liveness-recovery`
+- Liveness-fix merge commit: `aa116d7039f6892fe2577863e493350f81f6aa42` on `main`
 - Network target: GenLayer StudioNet, chain ID `61999`
 - Intelligent Contracts: exactly one Python contract, `contracts/Bidframe.py`
 
@@ -27,20 +27,15 @@ Neither path can create or increase a landlord charge. Their purpose is only to 
 
 This deployment is **not canonical for submission anymore** because it does not contain the liveness recovery methods introduced after audit.
 
-## Validation required for the revised source
+## Validation record for the revised source
 
-Before the next deployment, run and record:
+- GenVM lint: **PASS** on the revised contract in GitHub Actions before merge.
+- Direct Mode: **PASS**, 19 tests, GitHub Actions run `35437919189`.
+- Frontend dependency install: **PASS**.
+- Frontend typecheck: **PASS**.
+- Frontend production build: **PASS**.
 
-```bash
-genvm-lint check contracts/Bidframe.py
-gltest tests/ -v
-cd frontend
-npm install
-npm run typecheck
-npm run build
-```
-
-The updated test suite must include the challenged-evidence recovery and finalized-`INCONCLUSIVE` recovery cases.
+The 19-test suite includes challenged-evidence recovery and finalized-`INCONCLUSIVE` recovery cases. Before deployment, rerun `genvm-lint check contracts/Bidframe.py` locally with the deployment toolchain as a final source gate.
 
 ## Canonical deployment — pending
 
@@ -79,8 +74,8 @@ After canonical deployment:
 - set `VITE_CONTRACT_ADDRESS`;
 - rerun typecheck and production build;
 - verify reads/writes against the revised contract;
-- deploy to Vercel if credentials are available;
-- record the production URL here.
+- the project owner will deploy the finished frontend to Vercel;
+- after that deployment, record the production URL here.
 
 ## Submission rule
 
