@@ -4,7 +4,7 @@
 
 Bidframe is a single Intelligent Contract plus a reviewer-facing web application for settling security deposits from sealed before/after evidence. A landlord defines the parties, deposit, inventory, move-in evidence hashes, and item-level deduction schedule before funds are locked. At checkout, GenLayer validators inspect the exact evidence bytes and return only a bounded condition classification. The contract converts that classification into a deterministic deduction and never lets the model invent a price, recipient, item, or payout.
 
-> Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. Local lint, Direct Mode tests, frontend typecheck, and production build pass. Live proof includes an `UNCHANGED` result and a fail-closed disagreement with zero-deduction recovery. A successful `NEW_DAMAGE` finding and nonzero landlord payout are still required before submission readiness.
+> Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. The live frontend is https://bidframe-seven.vercel.app/. Contract lint, 19 Direct Mode tests, frontend typecheck/build, and submission fingerprinting are CI gates. Live proof includes exact 1 GEN funding, `UNCHANGED`, challenge blocking, zero-deduction recovery, settlement/refund, and repeat-settlement rollback. A successful `NEW_DAMAGE` finding with a nonzero landlord payout remains the final economic proof required before submission readiness.
 
 ## Why GenLayer
 
@@ -53,11 +53,11 @@ Do not substitute Studio development preview (`61997`) or Bradbury.
 
 ## Frontend
 
-The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical address from `VITE_CONTRACT_ADDRESS`. Without a configured address it shows setup guidance and no fabricated sample case. Wallet writes target StudioNet 61999 and wait for finalized execution success before refreshing state.
+The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical StudioNet address. `VITE_CONTRACT_ADDRESS` can override the pinned canonical address for a future redeployment. The wallet path uses injected EIP-1193 providers only: it requests accounts, switches/adds StudioNet 61999 when needed, verifies `eth_chainId` after the wallet prompt, and then creates the provider-backed GenLayer client without requesting MetaMask Snaps. Wallet writes wait for finalized successful execution before refreshing state.
 
 ```bash
 cd frontend
-npm install
+npm ci
 cp ../.env.example .env
 npm run dev
 ```
@@ -113,7 +113,7 @@ genlayer network info
 genlayer deploy --contract contracts/Bidframe.py
 ```
 
-Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. A live `NEW_DAMAGE` consensus result and nonzero GEN landlord transfer remain outstanding.
+Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. The only remaining submission proof is a finalized `NEW_DAMAGE` consensus result with the corresponding frozen nonzero deduction and native GEN landlord/tenant transfer evidence.
 
 ## License
 
