@@ -3,35 +3,175 @@ import { studionet } from 'genlayer-js/chains'
 import { TransactionStatus } from 'genlayer-js/types'
 
 export const CHAIN_ID = 61999
+export const CHAIN_HEX = '0xf22f'
+export const STUDIO_RPC = 'https://studio.genlayer.com/api'
 export const EXPLORER_BASE = import.meta.env.VITE_EXPLORER_BASE || 'https://explorer-studio.genlayer.com'
 export const CONTRACT_ADDRESS = (import.meta.env.VITE_CONTRACT_ADDRESS || '') as `0x${string}` | ''
 
 export const readClient = createClient({ chain: studionet })
 export type WalletClient = ReturnType<typeof createClient>
 
+type ProviderErrorInfo = { code?: number; message?: string }
+
 export function isContractConfigured(): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS)
 }
 
-export async function connectWallet() {
-  if (!window.ethereum) throw new Error('No injected EIP-1193 wallet found. Install MetaMask or a compatible wallet.')
-  const accounts = (await window.ethereum.request({ method: 'eth_requestAccounts' })) as string[]
-  const address = accounts?.[0]
-  if (!address) throw new Error('Wallet did not return an account.')
-  const chainHex = `0x${CHAIN_ID.toString(16)}`
-  const currentChain = await window.ethereum.request({ method: 'eth_chainId' })
-  if (String(currentChain).toLowerCase() !== chainHex) {
-    try {
-      await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] })
-    } catch (switchError) {
-      const code = (switchError as { code?: number }).code
-      if (code !== 4902) throw new Error('Switch your wallet to GenLayer StudioNet (chain 61999) and try again.')
-      await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: chainHex, chainName: 'GenLayer StudioNet', rpcUrls: ['https://studio.genlayer.com/api'], nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 }, blockExplorerUrls: [EXPLORER_BASE] }] })
+export function getInjectedProvider() {
+  return window.ethereum
+}
+
+function parseProviderCode(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) return Number(value)
+  return undefined
+}
+
+function extractProviderError(error: unknown): ProviderErrorInfo {
+  const queue: unknown[] = [error]
+  const seen = new Set<unknown>()
+  let message: string | undefined
+
+  while (queue.length) {
+    const current = queue.shift()
+    if (current == null || seen.has(current)) continue
+    seen.add(current)
+
+    if (typeof current === 'string') {
+      message ||= current
+      continue
+    }
+    if (current instanceof Error) {
+      message ||= current.message
+      const errorWithCause = current as Error & { code?: unknown; cause?: unknown }
+      const code = parseProviderCode(errorWithCause.code)
+      if (code !== undefined) return { code, message }
+      if (errorWithCause.cause !== undefined) queue.push(errorWithCause.cause)
+      continue
+    }
+    if (typeof current !== 'object') continue
+
+    const record = current as Record<string, unknown>
+    if (typeof record.message === 'string' && record.message.trim()) message ||= record.message
+    const code = parseProviderCode(record.code)
+    if (code !== undefined) return { code, message }
+
+    for (const key of ['error', 'cause', 'data', 'originalError']) {
+      if (record[key] !== undefined) queue.push(record[key])
     }
   }
-  const client = createClient({ chain: studionet, account: address as `0x${string}`, provider: window.ethereum })
-  await client.connect('studionet')
-  return { address, client }
+
+  return { message }
+}
+
+export function walletErrorMessage(error: unknown, fallback = 'Wallet connection failed.'): string {
+  const info = extractProviderError(error)
+  if (info.code === 4001) return 'Wallet request was rejected. Approve the account/network request in your wallet to continue.'
+  if (info.code === -32002) return 'A wallet request is already pending. Open your wallet and complete or reject it, then try again.'
+  if (info.code === 4902) return 'GenLayer StudioNet is not configured in this wallet yet.'
+  if (info.message) return info.message
+  return fallback
+}
+
+async function requestProvider(provider: NonNullable<Window['ethereum']>, method: string, params?: unknown[] | object) {
+  try {
+    return await provider.request(params === undefined ? { method } : { method, params })
+  } catch (error) {
+    throw new Error(walletErrorMessage(error, `Wallet request failed while calling ${method}.`))
+  }
+}
+
+function normalizeChainId(value: unknown): string {
+  return String(value ?? '').toLowerCase()
+}
+
+export async function ensureStudioNet(provider: NonNullable<Window['ethereum']>) {
+  let currentChain = normalizeChainId(await requestProvider(provider, 'eth_chainId'))
+  if (currentChain === CHAIN_HEX) return
+
+  try {
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: CHAIN_HEX }],
+    })
+  } catch (switchError) {
+    const info = extractProviderError(switchError)
+    if (info.code !== 4902) {
+      throw new Error(walletErrorMessage(switchError, 'Could not switch the wallet to GenLayer StudioNet.'))
+    }
+
+    try {
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: CHAIN_HEX,
+          chainName: 'GenLayer StudioNet',
+          rpcUrls: [STUDIO_RPC],
+          nativeCurrency: { name: 'GEN', symbol: 'GEN', decimals: 18 },
+          blockExplorerUrls: [EXPLORER_BASE],
+        }],
+      })
+    } catch (addError) {
+      throw new Error(walletErrorMessage(addError, 'Could not add GenLayer StudioNet to the wallet.'))
+    }
+
+    // Adding a chain does not guarantee every injected wallet leaves it selected.
+    try {
+      await provider.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: CHAIN_HEX }],
+      })
+    } catch (secondSwitchError) {
+      throw new Error(walletErrorMessage(secondSwitchError, 'GenLayer StudioNet was added, but the wallet did not switch to it.'))
+    }
+  }
+
+  currentChain = normalizeChainId(await requestProvider(provider, 'eth_chainId'))
+  if (currentChain !== CHAIN_HEX) {
+    throw new Error(`Wallet is still on chain ${currentChain || 'unknown'}. Switch to GenLayer StudioNet (61999 / ${CHAIN_HEX}) and try again.`)
+  }
+}
+
+export async function connectWallet() {
+  const provider = getInjectedProvider()
+  if (!provider) throw new Error('No injected EIP-1193 wallet found. Install MetaMask or a compatible wallet.')
+
+  try {
+    const requestedAccounts = await provider.request({ method: 'eth_requestAccounts' })
+    const accounts = Array.isArray(requestedAccounts) ? requestedAccounts.map(String) : []
+    const address = accounts[0]
+    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      throw new Error('Wallet did not return a valid account.')
+    }
+
+    await ensureStudioNet(provider)
+
+    // Re-read accounts after the network prompts in case the wallet account changed.
+    const currentAccounts = await provider.request({ method: 'eth_accounts' })
+    const activeAccounts = Array.isArray(currentAccounts) ? currentAccounts.map(String) : []
+    const activeAddress = activeAccounts[0] || address
+    if (!/^0x[a-fA-F0-9]{40}$/.test(activeAddress)) {
+      throw new Error('Wallet did not expose a valid account after switching to StudioNet.')
+    }
+
+    const verifiedChain = normalizeChainId(await provider.request({ method: 'eth_chainId' }))
+    if (verifiedChain !== CHAIN_HEX) {
+      throw new Error(`Wallet network verification failed: expected ${CHAIN_HEX}, received ${verifiedChain || 'unknown'}.`)
+    }
+
+    // Do not call client.connect('studionet') here. genlayer-js 1.1.8's connect()
+    // also invokes MetaMask Snap APIs. Bidframe intentionally uses injected
+    // EIP-1193 wallets only, so network management is completed above.
+    const client = createClient({
+      chain: studionet,
+      account: activeAddress as `0x${string}`,
+      provider,
+    })
+
+    return { address: activeAddress, client }
+  } catch (error) {
+    throw new Error(walletErrorMessage(error))
+  }
 }
 
 export async function readContract<T>(functionName: string, args: unknown[] = []): Promise<T> {
@@ -79,4 +219,3 @@ export async function submitContract(client: WalletClient, functionName: string,
 
 export function explorerTx(hash: string) { return `${EXPLORER_BASE}/tx/${hash}` }
 export function explorerAddress(address: string) { return `${EXPLORER_BASE}/address/${address}` }
-
