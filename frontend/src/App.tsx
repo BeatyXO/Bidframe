@@ -47,18 +47,53 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
   const [tx, setTx] = useState<TxState | null>(null)
+  const [activity, setActivity] = useState<TxRecord[]>(loadActivity)
+  const [wrongNetwork, setWrongNetwork] = useState(false)
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const walletMenuRef = useRef<HTMLDivElement | null>(null)
+  const reconcilingRef = useRef(new Set<string>())
   const configured = isContractConfigured()
 
-  const refresh = useCallback(async (id = agreementId) => {
+  const updateActivity = useCallback((hash: string, patch: Partial<TxRecord> & Pick<TxRecord, 'hash'>) => {
+    setActivity(previous => {
+      const existing = previous.find(row => row.hash === hash)
+      const nextRecord: TxRecord = {
+        label: patch.label ?? existing?.label ?? 'StudioNet transaction',
+        hash,
+        agreementId: patch.agreementId ?? existing?.agreementId ?? '',
+        status: patch.status ?? existing?.status ?? 'submitted',
+        submittedAt: patch.submittedAt ?? existing?.submittedAt ?? Date.now(),
+        updatedAt: patch.updatedAt ?? Date.now(),
+        message: patch.message ?? existing?.message ?? 'Submitted to StudioNet.',
+      }
+      const next = [nextRecord, ...previous.filter(row => row.hash !== hash)].slice(0, 50)
+      try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(next)) } catch { /* local history is best-effort */ }
+      return next
+    })
+  }, [])
+
+  const bindActivityToAgreement = useCallback((hash: string, id: string) => {
+    if (!hash || !id) return
+    updateActivity(hash, { hash, agreementId: id, updatedAt: Date.now() })
+  }, [updateActivity])
+
+  const refresh = useCallback(async (id: string, quiet = false) => {
     if (!configured || !id) return
-    setLoading(true); setError('')
+    if (!quiet) { setLoading(true); setError('') }
     try {
       const a = await readContract<Agreement>('get_agreement', [BigInt(id)])
       const rows = await Promise.all(Array.from({ length: Number(a.item_count) }, (_, i) => readContract<Item>('get_item', [BigInt(id), BigInt(i + 1)])))
-      setAgreement({ ...a, deposit_wei: amount(a.deposit_wei), raw_deduction_wei: amount(a.raw_deduction_wei), settlement_deduction_wei: amount(a.settlement_deduction_wei), projected_refund_wei: amount(a.projected_refund_wei) }); setItems(rows)
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.') } finally { setLoading(false) }
-  }, [agreementId, configured])
-  useEffect(() => { void refresh() }, [refresh])
+      setAgreement({ ...a, deposit_wei: amount(a.deposit_wei), raw_deduction_wei: amount(a.raw_deduction_wei), settlement_deduction_wei: amount(a.settlement_deduction_wei), projected_refund_wei: amount(a.projected_refund_wei) })
+      setItems(rows)
+    } catch (e) {
+      if (!quiet) setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.')
+    } finally {
+      if (!quiet) setLoading(false)
+    }
+  }, [configured])
+
+  useEffect(() => { if (agreementId) void refresh(agreementId) }, [agreementId, refresh])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -77,25 +112,58 @@ export default function App() {
     return () => window.removeEventListener('popstate', syncFromHistory)
   }, [])
 
+  const hydrateAuthorizedWallet = useCallback(async ({ announce = false, respectLocalDisconnect = true }: { announce?: boolean; respectLocalDisconnect?: boolean } = {}) => {
+    if (respectLocalDisconnect && sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
+    const snapshot = await getAuthorizedWalletSnapshot()
+    if (!snapshot.provider || !snapshot.address) {
+      setWallet('')
+      setClient(null)
+      setWrongNetwork(false)
+      return
+    }
+
+    setWallet(snapshot.address)
+    if (snapshot.chainId === CHAIN_HEX) {
+      setClient(createInjectedWalletClient(snapshot.provider, snapshot.address))
+      setWrongNetwork(false)
+      setError('')
+      if (announce) setNotice('Wallet session restored on GenLayer StudioNet · 61999.')
+    } else {
+      setClient(null)
+      setWrongNetwork(true)
+      if (announce) setNotice('Wallet is authorized, but writes are disabled until you switch to GenLayer StudioNet 61999.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void hydrateAuthorizedWallet().catch(e => setError(e instanceof Error ? e.message : 'Unable to restore wallet session.'))
+  }, [hydrateAuthorizedWallet])
+
   useEffect(() => {
     const provider = getInjectedProvider()
     if (!provider?.on) return
 
-    const handleAccountsChanged = () => {
-      setWallet('')
-      setClient(null)
-      setNotice('')
-      setError('Wallet account changed. Reconnect Bidframe to continue with the active account.')
+    const handleAccountsChanged = (...args: unknown[]) => {
+      if (sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
+      const supplied = Array.isArray(args[0]) ? args[0].map(String) : []
+      if (supplied.length === 0) {
+        setWallet('')
+        setClient(null)
+        setWrongNetwork(false)
+        setWalletMenuOpen(false)
+        return
+      }
+      void hydrateAuthorizedWallet({ announce: true, respectLocalDisconnect: false }).catch(e => setError(e instanceof Error ? e.message : 'Unable to update wallet account.'))
     }
     const handleChainChanged = (...args: unknown[]) => {
+      if (sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
       const chainId = String(args[0] ?? '').toLowerCase()
-      setClient(null)
-      setNotice('')
       if (chainId === CHAIN_HEX) {
-        setError('Wallet network changed to StudioNet. Reconnect Bidframe to refresh the active account.')
+        void hydrateAuthorizedWallet({ announce: true, respectLocalDisconnect: false }).catch(e => setError(e instanceof Error ? e.message : 'Unable to restore StudioNet wallet session.'))
       } else {
-        setWallet('')
-        setError(`Wallet left GenLayer StudioNet. Connect again to switch back to 61999 / ${CHAIN_HEX}.`)
+        setClient(null)
+        setWrongNetwork(true)
+        setNotice('Wallet left StudioNet. Reads remain available; reconnect to switch back to chain 61999 before writing.')
       }
     }
 
@@ -105,19 +173,176 @@ export default function App() {
       provider.removeListener?.('accountsChanged', handleAccountsChanged)
       provider.removeListener?.('chainChanged', handleChainChanged)
     }
-  }, [])
+  }, [hydrateAuthorizedWallet])
 
-  async function connect() { try { setError(''); const result = await connectWallet(); setWallet(result.address); setClient(result.client); setNotice('Connected to GenLayer StudioNet · 61999.') } catch (e) { setError(e instanceof Error ? e.message : 'Wallet connection failed.') } }
-  async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
-    if (!client) { setError('Connect an injected wallet before writing.'); return }
-    setError(''); setNotice(''); setTx({ stage: 'pending', message: `${label}: submitting to StudioNet…` })
+  useEffect(() => {
+    if (!walletMenuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (walletMenuRef.current && !walletMenuRef.current.contains(event.target as Node)) setWalletMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setWalletMenuOpen(false) }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [walletMenuOpen])
+
+  useEffect(() => {
+    if (active !== 'case' || !agreementId) return
+    const sync = () => { if (!document.hidden) void refresh(agreementId, true) }
+    const interval = window.setInterval(sync, 30000)
+    const onVisibility = () => { if (!document.hidden) sync() }
+    window.addEventListener('focus', sync)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', sync)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [active, agreementId, refresh])
+
+  useEffect(() => {
+    const pending = activity.filter(row => row.status === 'submitted' || row.status === 'finalizing')
+    for (const record of pending) {
+      if (reconcilingRef.current.has(record.hash)) continue
+      reconcilingRef.current.add(record.hash)
+      void waitForStudioFinality(
+        record.hash,
+        async (outcome, attempt) => {
+          if (outcome.state === 'pending') {
+            const message = attempt >= 2 ? 'Still finalizing on StudioNet.' : 'Submitted · waiting for StudioNet finalization.'
+            updateActivity(record.hash, { hash: record.hash, status: 'finalizing', message, updatedAt: Date.now() })
+            if (record.agreementId === agreementId) setTx({ stage: 'finalizing', hash: record.hash, message: `${record.label}: ${message}` })
+          }
+        },
+        async () => {
+          if (record.agreementId && record.agreementId === agreementId && !document.hidden) await refresh(record.agreementId, true)
+        },
+      ).then(async outcome => {
+        if (outcome.state === 'success') {
+          updateActivity(record.hash, { hash: record.hash, status: 'finalized', message: outcome.message, updatedAt: Date.now() })
+          if (record.agreementId === agreementId) {
+            setTx({ stage: 'finalized', hash: record.hash, message: `${record.label}: finalized successfully.` })
+            await refresh(record.agreementId, true)
+          }
+        } else {
+          updateActivity(record.hash, { hash: record.hash, status: 'failed', message: outcome.message, updatedAt: Date.now() })
+          if (record.agreementId === agreementId) {
+            setTx({ stage: 'failed', hash: record.hash, message: `${record.label}: ${outcome.message}` })
+            setError(`${record.label} finalized without successful execution: ${outcome.message}`)
+          }
+        }
+      }).finally(() => reconcilingRef.current.delete(record.hash))
+    }
+  }, [activity, agreementId, refresh, updateActivity])
+
+  async function connect() {
     try {
-      // SDK submission returns the canonical transaction hash; finalization can take several minutes.
-      const pending = await submitAndTrack(client, functionName, args, value, label, setTx)
-      setTx({ stage: 'finalized', hash: pending.hash, message: `${label}: finalized successfully.` }); setNotice(`${label} is finalized. State refreshed from the contract.`)
-      if (refreshId) await refresh(refreshId)
-      return { hash: pending.hash, returnValue: pending.returnValue }
-    } catch (e) { const message = e instanceof Error ? e.message : 'Transaction failed.'; setTx(current => ({ stage: 'failed', hash: current?.hash, message })); setError(message) }
+      sessionStorage.removeItem(LOCAL_DISCONNECT_KEY)
+      setError('')
+      setNotice('')
+      setWalletMenuOpen(false)
+      const result = await connectWallet()
+      setWallet(result.address)
+      setClient(result.client)
+      setWrongNetwork(false)
+      setNotice('Connected to GenLayer StudioNet · 61999.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Wallet connection failed.')
+    }
+  }
+
+  async function copyWalletAddress() {
+    if (!wallet) return
+    try {
+      await navigator.clipboard.writeText(wallet)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1400)
+    } catch {
+      setError('Unable to copy the wallet address from this browser.')
+    }
+  }
+
+  function disconnectLocal() {
+    sessionStorage.setItem(LOCAL_DISCONNECT_KEY, '1')
+    setWallet('')
+    setClient(null)
+    setWrongNetwork(false)
+    setWalletMenuOpen(false)
+    setCopied(false)
+    setNotice('')
+    setError('')
+  }
+
+  async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
+    if (!client) {
+      setError(wrongNetwork ? 'Switch the wallet to GenLayer StudioNet 61999 before writing.' : 'Connect an injected wallet before writing.')
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setTx({ stage: 'submitted', message: `${label}: submitting to StudioNet…` })
+    let hash = ''
+    try {
+      const submitted = await submitContract(client, functionName, args, value)
+      hash = submitted.hash
+      const record: TxRecord = {
+        label,
+        hash,
+        agreementId: refreshId || '',
+        status: 'finalizing',
+        submittedAt: Date.now(),
+        updatedAt: Date.now(),
+        message: 'Submitted · waiting for StudioNet finalization.',
+      }
+      reconcilingRef.current.add(hash)
+      updateActivity(hash, { ...record, hash })
+      setTx({ stage: 'finalizing', hash, message: `${label}: Submitted · waiting for StudioNet finalization.` })
+
+      const outcome = await waitForStudioFinality(
+        hash,
+        async (current, attempt) => {
+          if (current.state === 'pending') {
+            const message = attempt >= 2 ? 'Still finalizing on StudioNet.' : 'Submitted · waiting for StudioNet finalization.'
+            updateActivity(hash, { hash, status: 'finalizing', message, updatedAt: Date.now() })
+            setTx({ stage: 'finalizing', hash, message: `${label}: ${message}` })
+          }
+        },
+        async () => {
+          if (refreshId && !document.hidden) await refresh(refreshId, true)
+        },
+      )
+
+      if (outcome.state === 'success') {
+        updateActivity(hash, { hash, status: 'finalized', message: outcome.message, updatedAt: Date.now() })
+        setTx({ stage: 'finalized', hash, message: `${label}: finalized successfully.` })
+        setNotice(`${label} is finalized. State refreshed from the contract.`)
+        if (refreshId) await refresh(refreshId, true)
+        return { hash }
+      }
+
+      updateActivity(hash, { hash, status: 'failed', message: outcome.message, updatedAt: Date.now() })
+      setTx({ stage: 'failed', hash, message: `${label}: ${outcome.message}` })
+      setError(`${label} finalized without successful execution: ${outcome.message}`)
+      return
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Transaction submission failed.'
+      if (hash) {
+        // Once a hash exists, uncertain RPC/read errors are reconciled rather than
+        // converted into false terminal failures.
+        updateActivity(hash, { hash, status: 'finalizing', message: 'Still finalizing on StudioNet.', updatedAt: Date.now() })
+        setTx({ stage: 'finalizing', hash, message: `${label}: Still finalizing on StudioNet.` })
+      } else {
+        setTx({ stage: 'failed', message })
+        setError(message)
+      }
+      return
+    } finally {
+      if (hash) reconcilingRef.current.delete(hash)
+    }
   }
 
   const progress = useMemo(() => agreement?.item_count ? Math.round(agreement.assessed_count / agreement.item_count * 100) : 0, [agreement])
