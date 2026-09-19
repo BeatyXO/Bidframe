@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpRight, BadgeCheck, Building2, ChevronRight, CircleDollarSign, FileCheck2, Fingerprint, Gauge, Image as ImageIcon, LockKeyhole, Menu, Scale, ShieldCheck, Wallet, X } from 'lucide-react'
 import { StatusPill } from './components/StatusPill'
-import { assertSuccessfulFinalizedTransaction, CHAIN_HEX, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, getInjectedProvider, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
+import { CHAIN_HEX, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, createInjectedWalletClient, explorerAddress, explorerTx, getAuthorizedWalletSnapshot, getInjectedProvider, inspectTransaction, isContractConfigured, readContract, submitContract, type TransactionOutcome, type WalletClient } from './lib/genlayer'
 
 type Agreement = { id: number; title: string; property_ref: string; terms_hash: string; status: string; landlord: string; tenant: string; deposit_wei: bigint | string; item_count: number; assessed_count: number; raw_deduction_wei: bigint | string; settlement_deduction_wei: bigint | string; projected_refund_wei: bigint | string; has_inconclusive: boolean; inconclusive_count: number }
 type Item = { id: number; label: string; description: string; baseline_url: string; baseline_sha256: string; checkout_url: string; checkout_sha256: string; checkout_submitter: string; evidence_challenged: boolean; replacement_url: string; replacement_proposer: string; assessed: boolean; verdict: string; severity: number; deduction_wei: bigint | string; reasoning: string; inconclusive_resolved: boolean; minor_wei: bigint | string; moderate_wei: bigint | string; severe_wei: bigint | string; missing_wei: bigint | string }
-type TxState = { stage: 'pending' | 'finalizing' | 'finalized' | 'failed'; hash?: string; message: string }
+type TxStage = 'submitted' | 'finalizing' | 'finalized' | 'failed'
+type TxState = { stage: TxStage; hash?: string; message: string }
+type TxRecord = { label: string; hash: string; agreementId: string; status: TxStage; submittedAt: number; updatedAt: number; message: string }
 const GEN = 10n ** 18n
+const ACTIVITY_KEY = 'bidframe:transaction-activity:v1'
+const LOCAL_DISCONNECT_KEY = 'bidframe:local-disconnect:v1'
 const emptyItem = { label: '', description: '', baselineUrl: '', baselineHash: '', minor: '0', moderate: '0', severe: '0', missing: '0' }
 function agreementFromUrl() { const value = new URLSearchParams(window.location.search).get('agreement') || ''; return /^\d+$/.test(value) && BigInt(value) > 0n ? value : '' }
 function isHttpsUrl(value: string) { try { return new URL(value).protocol === 'https:' } catch { return false } }
@@ -15,6 +19,21 @@ function gen(value: bigint | string | number | undefined) { return `${(Number(am
 function genWei(value: string) { if (!/^\d+(\.\d{0,18})?$/.test(value)) throw new Error('Enter a non-negative GEN amount with at most 18 decimal places.'); const [whole, fraction = ''] = value.split('.'); return BigInt(whole) * GEN + BigInt((fraction + '0'.repeat(18)).slice(0, 18)) }
 function hashFile(file: File): Promise<string> { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = async () => { try { const bytes = await crypto.subtle.digest('SHA-256', reader.result as ArrayBuffer); resolve(Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('')) } catch (e) { reject(e) } }; reader.onerror = () => reject(reader.error); reader.readAsArrayBuffer(file) }) }
 function verdictTone(value: string) { return value === 'UNCHANGED' ? 'green' : value === 'NORMAL_WEAR' ? 'slate' : value === 'NEW_DAMAGE' ? 'amber' : value === 'MISSING' ? 'red' : 'purple' }
+function loadActivity(): TxRecord[] { try { const raw = localStorage.getItem(ACTIVITY_KEY); const rows = raw ? JSON.parse(raw) : []; return Array.isArray(rows) ? rows.filter(row => row?.hash && row?.label).slice(0, 50) : [] } catch { return [] } }
+function delay(ms: number) { return new Promise(resolve => window.setTimeout(resolve, ms)) }
+async function waitForStudioFinality(hash: string, onProgress: (outcome: TransactionOutcome, attempt: number) => void | Promise<void>, onHeartbeat?: (attempt: number) => void | Promise<void>) {
+  let attempt = 0
+  while (true) {
+    const hidden = document.hidden
+    const waitMs = hidden ? 45000 : Math.min(8000 + attempt * 2000, 18000)
+    await delay(waitMs)
+    const outcome = await inspectTransaction(hash)
+    await onProgress(outcome, attempt)
+    if (outcome.state !== 'pending') return outcome
+    attempt += 1
+    if (attempt % 2 === 0) await onHeartbeat?.(attempt)
+  }
+}
 
 export default function App() {
   const [wallet, setWallet] = useState('')
