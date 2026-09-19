@@ -300,6 +300,8 @@ class Bidframe(gl.Contract):
             raise gl.vm.UserError("Item already assessed")
         if self.checkout_url.get(key, "") == "":
             raise gl.vm.UserError("Checkout evidence is missing")
+        if self.evidence_challenged[key]:
+            raise gl.vm.UserError("Resolve the evidence challenge before assessment")
         label = str(self.item_label[key])
         description = str(self.item_description[key])
         baseline_url = str(self.baseline_url[key])
@@ -410,6 +412,35 @@ Return JSON exactly with keys:
             self.has_inconclusive[agreement_id] = True
         self.agreement_status[agreement_id] = "ASSESSING"
         return result
+
+    @gl.public.write
+    def resolve_challenged_zero(self, agreement_id: u32, item_id: u32) -> None:
+        """Resolve challenged evidence conservatively at zero deduction."""
+        self._require_agreement(agreement_id)
+        self._require_party(agreement_id)
+        if self.agreement_status[agreement_id] not in ("CHECKOUT", "ASSESSING"):
+            raise gl.vm.UserError("Agreement is not accepting challenge resolution")
+        if int(item_id) <= 0 or int(item_id) > int(self.item_count[agreement_id]):
+            raise gl.vm.UserError("Unknown inventory item")
+
+        key = self._item_key(agreement_id, item_id)
+        if self.item_assessed[key]:
+            raise gl.vm.UserError("Item already assessed")
+        if not self.evidence_challenged[key]:
+            raise gl.vm.UserError("Evidence is not challenged")
+
+        self.item_assessed[key] = True
+        self.item_verdict[key] = "INCONCLUSIVE"
+        self.item_severity[key] = u8(0)
+        self.item_deduction_wei[key] = u256(0)
+        self.item_reasoning[key] = "Challenged evidence resolved conservatively at zero deduction."
+        self.item_inconclusive_resolved[key] = True
+        self.evidence_challenged[key] = False
+        self.replacement_url[key] = ""
+        self.replacement_sha256[key] = ""
+        self.replacement_proposer[key] = Address("0x0000000000000000000000000000000000000000")
+        self.assessed_count[agreement_id] = u32(int(self.assessed_count[agreement_id]) + 1)
+        self.agreement_status[agreement_id] = "ASSESSING"
 
     @gl.public.write
     def resolve_inconclusive_zero(self, agreement_id: u32, item_id: u32) -> None:
