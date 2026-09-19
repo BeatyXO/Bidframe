@@ -1,6 +1,5 @@
 import { createClient } from 'genlayer-js'
 import { studionet } from 'genlayer-js/chains'
-import { TransactionStatus } from 'genlayer-js/types'
 
 export const CHAIN_ID = 61999
 export const CHAIN_HEX = '0xf22f'
@@ -12,6 +11,29 @@ export const readClient = createClient({ chain: studionet })
 export type WalletClient = ReturnType<typeof createClient>
 
 type ProviderErrorInfo = { code?: number; message?: string }
+type StudioTransaction = {
+  statusName?: string
+  status?: number
+  result_name?: string
+  from_address?: string
+  to_address?: string
+  value?: bigint | string | number | null
+  created_at?: string
+  consensus_data?: {
+    leader_receipt?: Array<{
+      mode?: string
+      execution_result?: string
+      result?: { status?: string } | string | unknown
+      pending_transactions?: Array<{ on?: string; value?: bigint | string | number; address?: string; is_eth_send?: boolean }>
+    }>
+  }
+}
+
+export type TransactionOutcome = {
+  state: 'pending' | 'success' | 'failed'
+  message: string
+  transaction?: StudioTransaction
+}
 
 export function isContractConfigured(): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(CONTRACT_ADDRESS)
@@ -85,6 +107,30 @@ function normalizeChainId(value: unknown): string {
   return String(value ?? '').toLowerCase()
 }
 
+function parseAccounts(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(String).filter(address => /^0x[a-fA-F0-9]{40}$/.test(address))
+    : []
+}
+
+export function createInjectedWalletClient(provider: NonNullable<Window['ethereum']>, address: string): WalletClient {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(address)) throw new Error('Wallet did not expose a valid account.')
+  return createClient({
+    chain: studionet,
+    account: address as `0x${string}`,
+    provider,
+  })
+}
+
+export async function getAuthorizedWalletSnapshot() {
+  const provider = getInjectedProvider()
+  if (!provider) return { provider: null, address: '', chainId: '' }
+
+  const accounts = parseAccounts(await requestProvider(provider, 'eth_accounts'))
+  const chainId = normalizeChainId(await requestProvider(provider, 'eth_chainId'))
+  return { provider, address: accounts[0] || '', chainId }
+}
+
 export async function ensureStudioNet(provider: NonNullable<Window['ethereum']>) {
   let currentChain = normalizeChainId(await requestProvider(provider, 'eth_chainId'))
   if (currentChain === CHAIN_HEX) return
@@ -115,7 +161,6 @@ export async function ensureStudioNet(provider: NonNullable<Window['ethereum']>)
       throw new Error(walletErrorMessage(addError, 'Could not add GenLayer StudioNet to the wallet.'))
     }
 
-    // Adding a chain does not guarantee every injected wallet leaves it selected.
     try {
       await provider.request({
         method: 'wallet_switchEthereumChain',
@@ -137,38 +182,22 @@ export async function connectWallet() {
   if (!provider) throw new Error('No injected EIP-1193 wallet found. Install MetaMask or a compatible wallet.')
 
   try {
-    const requestedAccounts = await provider.request({ method: 'eth_requestAccounts' })
-    const accounts = Array.isArray(requestedAccounts) ? requestedAccounts.map(String) : []
-    const address = accounts[0]
-    if (!address || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      throw new Error('Wallet did not return a valid account.')
-    }
+    const requestedAccounts = parseAccounts(await provider.request({ method: 'eth_requestAccounts' }))
+    const address = requestedAccounts[0]
+    if (!address) throw new Error('Wallet did not return a valid account.')
 
     await ensureStudioNet(provider)
 
-    // Re-read accounts after the network prompts in case the wallet account changed.
-    const currentAccounts = await provider.request({ method: 'eth_accounts' })
-    const activeAccounts = Array.isArray(currentAccounts) ? currentAccounts.map(String) : []
-    const activeAddress = activeAccounts[0] || address
-    if (!/^0x[a-fA-F0-9]{40}$/.test(activeAddress)) {
-      throw new Error('Wallet did not expose a valid account after switching to StudioNet.')
-    }
+    const currentAccounts = parseAccounts(await provider.request({ method: 'eth_accounts' }))
+    const activeAddress = currentAccounts[0] || address
+    if (!activeAddress) throw new Error('Wallet did not expose a valid account after switching to StudioNet.')
 
     const verifiedChain = normalizeChainId(await provider.request({ method: 'eth_chainId' }))
     if (verifiedChain !== CHAIN_HEX) {
       throw new Error(`Wallet network verification failed: expected ${CHAIN_HEX}, received ${verifiedChain || 'unknown'}.`)
     }
 
-    // Do not call client.connect('studionet') here. genlayer-js 1.1.8's connect()
-    // also invokes MetaMask Snap APIs. Bidframe intentionally uses injected
-    // EIP-1193 wallets only, so network management is completed above.
-    const client = createClient({
-      chain: studionet,
-      account: activeAddress as `0x${string}`,
-      provider,
-    })
-
-    return { address: activeAddress, client }
+    return { address: activeAddress, client: createInjectedWalletClient(provider, activeAddress) }
   } catch (error) {
     throw new Error(walletErrorMessage(error))
   }
@@ -176,45 +205,59 @@ export async function connectWallet() {
 
 export async function readContract<T>(functionName: string, args: unknown[] = []): Promise<T> {
   if (!isContractConfigured()) throw new Error('The canonical Bidframe contract address is not configured yet.')
-  return await readClient.readContract({ address: CONTRACT_ADDRESS as `0x${string}`, functionName, args: args as never[] }) as T
-}
-
-export async function writeContract(client: WalletClient, functionName: string, args: unknown[] = [], value = 0n) {
-  if (!isContractConfigured()) throw new Error('The canonical Bidframe contract address is not configured yet.')
-  const hash = await client.writeContract({ address: CONTRACT_ADDRESS as `0x${string}`, functionName, args: args as never[], value })
-  const receipt = await readClient.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, interval: 3000 })
-  await assertSuccessfulFinalizedTransaction(String(hash), receipt)
-  return { hash: String(hash), receipt }
-}
-
-// The StudioNet JSON-RPC response exposes finality and execution under statusName,
-// result_name, and consensus_data.leader_receipt. genlayer-js 1.1.x does not
-// populate txExecutionResultName for this response shape.
-export async function assertSuccessfulFinalizedTransaction(hash: string, receipt: unknown) {
-  const tx = await readClient.getTransaction({ hash: hash as `0x${string}` & { length: 66 } }) as unknown as {
-    statusName?: string
-    status?: number
-    result_name?: string
-    consensus_data?: { leader_receipt?: Array<{ mode?: string; execution_result?: string; result?: { status?: string } }> }
-  }
-  const receiptStatus = receipt as { statusName?: string; status?: number }
-  const finalized = tx.statusName === 'FINALIZED' || receiptStatus.statusName === 'FINALIZED' || tx.status === 7 || receiptStatus.status === 7
-  const leader = tx.consensus_data?.leader_receipt?.find(row => row.mode === 'leader') ?? tx.consensus_data?.leader_receipt?.[0]
-  const succeeded = finalized
-    && tx.result_name === 'MAJORITY_AGREE'
-    && leader?.execution_result === 'SUCCESS'
-    && leader.result?.status === 'return'
-  if (!succeeded) {
-    const detail = `status=${tx.statusName ?? receiptStatus.statusName ?? tx.status ?? receiptStatus.status ?? 'unknown'}, consensus=${tx.result_name ?? 'unknown'}, execution=${leader?.execution_result ?? 'unknown'}, return=${leader?.result?.status ?? 'unknown'}`
-    throw new Error(`Transaction did not finalize with successful contract execution (${detail}).`)
-  }
-  return tx
+  return await readClient.readContract({ address: CONTRACT_ADDRESS, functionName, args: args as never[] }) as T
 }
 
 export async function submitContract(client: WalletClient, functionName: string, args: unknown[] = [], value = 0n) {
   if (!isContractConfigured()) throw new Error('The canonical Bidframe contract address is not configured yet.')
-  const hash = await client.writeContract({ address: CONTRACT_ADDRESS as `0x${string}`, functionName, args: args as never[], value }) as `0x${string}` & { length: 66 }
-  return { hash: String(hash), finalized: readClient.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, interval: 3000 }) }
+  const hash = await client.writeContract({ address: CONTRACT_ADDRESS, functionName, args: args as never[], value }) as `0x${string}` & { length: 66 }
+  return { hash: String(hash) }
+}
+
+export async function inspectTransaction(hash: string): Promise<TransactionOutcome> {
+  try {
+    const tx = await readClient.getTransaction({ hash: hash as `0x${string}` & { length: 66 } }) as unknown as StudioTransaction
+    const finalized = tx.statusName === 'FINALIZED' || tx.status === 7
+    if (!finalized) {
+      return { state: 'pending', message: `StudioNet status: ${tx.statusName ?? tx.status ?? 'pending'}.`, transaction: tx }
+    }
+
+    const leader = tx.consensus_data?.leader_receipt?.find(row => row.mode === 'leader') ?? tx.consensus_data?.leader_receipt?.[0]
+    const resultStatus = leader?.result && typeof leader.result === 'object'
+      ? (leader.result as { status?: string }).status
+      : undefined
+    const success = tx.result_name === 'MAJORITY_AGREE'
+      && leader?.execution_result === 'SUCCESS'
+      && (resultStatus === undefined || resultStatus === 'return')
+
+    if (success) {
+      return { state: 'success', message: 'FINALIZED / MAJORITY_AGREE / SUCCESS', transaction: tx }
+    }
+
+    const detail = `FINALIZED / ${tx.result_name ?? 'unknown consensus'} / ${leader?.execution_result ?? 'unknown execution'}${resultStatus ? ` / ${resultStatus}` : ''}`
+    return { state: 'failed', message: detail, transaction: tx }
+  } catch (error) {
+    // A submitted hash can be temporarily unavailable while StudioNet indexes or
+    // rate-limits reads. That is not a terminal transaction failure.
+    return {
+      state: 'pending',
+      message: `StudioNet status is temporarily unavailable; continuing to reconcile. ${error instanceof Error ? error.message : ''}`.trim(),
+    }
+  }
+}
+
+export async function assertSuccessfulFinalizedTransaction(hash: string, _receipt?: unknown) {
+  const outcome = await inspectTransaction(hash)
+  if (outcome.state !== 'success') {
+    throw new Error(outcome.state === 'pending'
+      ? `Transaction is not finalized yet (${outcome.message}).`
+      : `Transaction finalized without successful contract execution (${outcome.message}).`)
+  }
+  return outcome.transaction
+}
+
+export async function writeContract(client: WalletClient, functionName: string, args: unknown[] = [], value = 0n) {
+  return submitContract(client, functionName, args, value)
 }
 
 export function explorerTx(hash: string) { return `${EXPLORER_BASE}/tx/${hash}` }

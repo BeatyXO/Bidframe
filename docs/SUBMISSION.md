@@ -19,6 +19,7 @@ An earlier saved code-query output was stale and did not represent the canonical
 
 - Wallet/CI/documentation hardening merge: `248836c516457ada6bd8b2426de96caf4c2d3545`
 - GitHub Actions Quality run: [35449480448](https://github.com/BeatyXO/Bidframe/actions/runs/35449480448) — **PASS**
+- Final submission-pass validation run: [35454602671](https://github.com/BeatyXO/Bidframe/actions/runs/35454602671) — **PASS** (GenVM lint, 19 Direct Mode tests, submission fingerprint, `npm ci`, typecheck, production build).
 - Contract source was not changed by the wallet hardening, so the canonical deployment/source-parity record below remains valid.
 - The live production URL is [https://bidframe-seven.vercel.app/](https://bidframe-seven.vercel.app/).
 
@@ -58,10 +59,34 @@ The detailed sanitized public transaction/readback log is [`studionet-lifecycle.
 
 Settlement readback confirmed deduction `0 GEN`, tenant refund `1 GEN`, and contract balance `0 GEN`; tenant balance rose from `1 GEN` to `2 GEN`. The repeated-settlement transaction finalized as rollback with agreement state still `SETTLED`; readback showed landlord `98 GEN`, tenant `2 GEN`, contract `0 GEN`, with no additional payout. This is native GEN transfer evidence for the zero-deduction path. No landlord deduction/payment was due in this run.
 
-## Remaining submission blocker
+## Agreement #4 — positive NEW_DAMAGE economic proof
 
-This is **not submission-ready**. A successful live `NEW_DAMAGE` assessment with severity 1–3, its frozen deterministic deduction, and a nonzero landlord GEN transfer have not been demonstrated. The attempted damage assessment finalized as `MAJORITY_DISAGREE` / `ERROR`; it left the item unassessed, and the agreement was safely recovered at zero. The log proves the fail-closed outcome, not a damage finding. The second-settlement negative test did pass. Repeat the lifecycle with evidence that produces validator consensus, then verify the frozen deduction and landlord payment before claiming completion.
+The previously missing positive path is now verified independently from StudioNet readback and the Studio explorer feed. The permanent machine-readable record is [`studionet-new-damage-lifecycle.json`](studionet-new-damage-lifecycle.json).
 
+Agreement `4` used landlord `0x98ACB6B20ee0f730d0b433c6f7167de792D8a2Dd`, tenant `0x95B37d7bF3F1b1B9e9a1Ae8300c627135C095375`, and an exact `1 GEN` deposit. It finalized `SETTLED` with one assessed item, raw/final deduction `0.5 GEN`, and tenant refund `0.5 GEN`.
+
+| Action | Transaction | Verified result |
+|---|---|---|
+| Create agreement #4 | [0x34a16dfd754a7c95610036d796a5bdcc0e34c5cec0dda123b1f55440f6c0aad2](https://explorer-studio.genlayer.com/tx/0x34a16dfd754a7c95610036d796a5bdcc0e34c5cec0dda123b1f55440f6c0aad2) | FINALIZED / MAJORITY_AGREE / SUCCESS |
+| Register item 1 | [0xb9b66391804bb0dc3de455995973f059d29f040dbd0f34a51372d0742bd8ab9b](https://explorer-studio.genlayer.com/tx/0xb9b66391804bb0dc3de455995973f059d29f040dbd0f34a51372d0742bd8ab9b) | FINALIZED / MAJORITY_AGREE / SUCCESS |
+| Tenant funds exact 1 GEN | [0xd6ac2104e468445982ad4fdbaa15e6a14da832c70e7f2cb1225f0d7287301fbe](https://explorer-studio.genlayer.com/tx/0xd6ac2104e468445982ad4fdbaa15e6a14da832c70e7f2cb1225f0d7287301fbe) | FINALIZED / MAJORITY_AGREE / SUCCESS; value 1 GEN |
+| Open checkout | [0xe6d0552086fda235400ba9de3af9509c63ff78d364d80eb2ea987fc79272981d](https://explorer-studio.genlayer.com/tx/0xe6d0552086fda235400ba9de3af9509c63ff78d364d80eb2ea987fc79272981d) | FINALIZED / MAJORITY_AGREE / SUCCESS |
+| Submit damaged move-out evidence | [0x9d00dd3d546f0d55cb45a1d8772f6c0644bfcb12e380ab6afc2ac3aa01a6a234](https://explorer-studio.genlayer.com/tx/0x9d00dd3d546f0d55cb45a1d8772f6c0644bfcb12e380ab6afc2ac3aa01a6a234) | FINALIZED / MAJORITY_AGREE / SUCCESS |
+| Assess item | [0xa934622ff2808edccf5ed46fd59e70ed4d0490534dc489a0b587ecf0ddb51ce1](https://explorer-studio.genlayer.com/tx/0xa934622ff2808edccf5ed46fd59e70ed4d0490534dc489a0b587ecf0ddb51ce1) | FINALIZED / MAJORITY_AGREE / SUCCESS; readback `NEW_DAMAGE`, severity 3 |
+| Mark READY | [0x4a99d6ac19115103a133ebdb788460d0442b71b89f33c8d62a4bc74e9cfe5d46](https://explorer-studio.genlayer.com/tx/0x4a99d6ac19115103a133ebdb788460d0442b71b89f33c8d62a4bc74e9cfe5d46) | FINALIZED / MAJORITY_AGREE / SUCCESS; READY |
+| Settle | [0xff14d0808973445fab66aaadd0b1477d24b4ea98b9f77aacc4a9a8e904f12235](https://explorer-studio.genlayer.com/tx/0xff14d0808973445fab66aaadd0b1477d24b4ea98b9f77aacc4a9a8e904f12235) | FINALIZED / MAJORITY_AGREE / SUCCESS; SETTLED |
+| Native landlord payment | [0x8eca95990809fa22d25734009fac93768d8d6b01679d2844a621faaf6c854620](https://explorer-studio.genlayer.com/tx/0x8eca95990809fa22d25734009fac93768d8d6b01679d2844a621faaf6c854620) | FINALIZED; contract → landlord, 0.5 GEN |
+| Native tenant refund | [0x86518dd0f9f5659a7ea6f8b38246ab7f9235c81d2c95b2e0018590ccb7372ab5](https://explorer-studio.genlayer.com/tx/0x86518dd0f9f5659a7ea6f8b38246ab7f9235c81d2c95b2e0018590ccb7372ab5) | FINALIZED; contract → tenant, 0.5 GEN |
+
+The item is `Living room wall`. Baseline evidence is `https://raw.githubusercontent.com/BeatyXO/bidframe-evidence/main/normal.png` with SHA-256 `00f30ebf06cb869089fb2c4614f3a0b6385d4eb94c3e7494b1ed14ddd82ab3bc`. Checkout evidence is `https://raw.githubusercontent.com/BeatyXO/bidframe-evidence/main/damaged.png` with SHA-256 `c86127256ba510862f0fd850ee362945aed458287adcca5528b1ba454705e313`.
+
+The frozen item schedule was minor `0.1 GEN`, moderate `0.25 GEN`, severe `0.5 GEN`, missing `1 GEN`. The finalized verdict was `NEW_DAMAGE`, severity `3`, so the contract deterministically selected the already-frozen severe amount: `0.5 GEN`. The settlement leader receipt scheduled exactly `0.5 GEN` to the landlord and `0.5 GEN` to the tenant; the two finalized child transfer transactions above prove those native GEN movements. Therefore Agreement #4 accounting closes exactly: `0.5 + 0.5 = 1 GEN`.
+
+### Historical residual-balance observation
+
+A separate earlier funding attempt, [0xa48161b06f505bf8b3964f5f00882446a788773b6cb5edfe715e6fa6719640e7](https://explorer-studio.genlayer.com/tx/0xa48161b06f505bf8b3964f5f00882446a788773b6cb5edfe715e6fa6719640e7), sent `1 GEN` before inventory registration. It finalized `MAJORITY_AGREE` but the contract execution result was `ERROR / rollback`. A fresh StudioNet balance query after Agreement #4 settlement reports a global contract balance of `1 GEN`; agreements 1–4 all read `SETTLED`. The residual is therefore recorded separately from Agreement #4's fully distributed escrow rather than being misreported as Agreement #4 funds. The current frontend blocks tenant funding while `item_count === 0`, preventing that specific invalid UI path from being offered again.
+
+The required positive economic proof is no longer missing. Together, Agreement #3 and Agreement #4 demonstrate both fail-closed/recovery behavior and a successful nonzero damage settlement.
 ## Frontend delivery
 
 - Live frontend: [https://bidframe-seven.vercel.app/](https://bidframe-seven.vercel.app/)
@@ -85,7 +110,11 @@ The fixed frontend now:
 6. re-reads `eth_chainId` and refuses to construct a write client unless it is exactly `0xF22F`;
 7. creates the `genlayer-js` client only against that verified injected provider;
 8. preserves actionable 4001, 4902, -32002 and nested/plain-object provider errors;
-9. clears cached wallet/client state on `accountsChanged` and `chainChanged`.
+9. hydrates already-authorized sessions on page load using `eth_accounts` without a popup when the wallet is already on StudioNet;
+10. automatically rebuilds the provider-backed client on compatible `accountsChanged` / `chainChanged` events, while leaving writes disabled on the wrong network;
+11. exposes a local wallet menu for copy, explorer and Bidframe-local disconnect without claiming to revoke wallet permissions;
+12. persists submitted transaction hashes and reconciles them with StudioNet so a wait timeout remains `finalizing`, not a false terminal failure;
+13. refreshes the loaded agreement after confirmed writes and on focus/visibility/periodic case reconciliation, with conservative polling to reduce rate-limit pressure.
 
 The contract source is unchanged by this wallet fix, so the canonical deployment/source-parity evidence remains valid.
 

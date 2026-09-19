@@ -1,0 +1,106 @@
+{
+  "product": "Bidframe — Consensus Security-Deposit Settlement",
+  "network": {
+    "name": "GenLayer StudioNet",
+    "chain_id": 61999,
+    "chain_id_hex": "0xF22F",
+    "rpc": "https://studio.genlayer.com/api",
+    "explorer": "https://explorer-studio.genlayer.com"
+  },
+  "contract": "0x3f5F81618cc86604f7094E525F46f37363CD99a7",
+  "agreement": {
+    "id": 4,
+    "title": "NEW_DAMAGE",
+    "property_ref": "LIVE-DAMAGE-00",
+    "status": "SETTLED",
+    "landlord": "0x98ACB6B20ee0f730d0b433c6f7167de792D8a2Dd",
+    "tenant": "0x95B37d7bF3F1b1B9e9a1Ae8300c627135C095375",
+    "deposit_wei": "1000000000000000000",
+    "deposit_gen": "1",
+    "item_count": 1,
+    "assessed_count": 1,
+    "raw_deduction_wei": "500000000000000000",
+    "settlement_deduction_wei": "500000000000000000",
+    "landlord_deduction_gen": "0.5",
+    "projected_refund_wei": "500000000000000000",
+    "tenant_refund_gen": "0.5",
+    "created_at": "2026-09-19T15:00:17.480161Z",
+    "funded_at": "2026-09-19T15:36:10.762386Z",
+    "checkout_opened_at": "2026-09-19T15:42:09.926648Z",
+    "ready_at": "2026-09-19T15:50:41.815799Z",
+    "settled_at": "2026-09-19T15:52:09.882664Z",
+    "terms_sha256": "8321949a8d3eec5804aad3b1f9f6b54e39f76bef42e06c8380fa817799d1c0f8"
+  },
+  "item": {
+    "id": 1,
+    "label": "Living room wall",
+    "description": "White painted interior wall. Compare the same wall area before and after tenancy for new physical damage.",
+    "baseline_url": "https://raw.githubusercontent.com/BeatyXO/bidframe-evidence/main/normal.png",
+    "baseline_sha256": "00f30ebf06cb869089fb2c4614f3a0b6385d4eb94c3e7494b1ed14ddd82ab3bc",
+    "checkout_url": "https://raw.githubusercontent.com/BeatyXO/bidframe-evidence/main/damaged.png",
+    "checkout_sha256": "c86127256ba510862f0fd850ee362945aed458287adcca5528b1ba454705e313",
+    "verdict": "NEW_DAMAGE",
+    "severity": 3,
+    "deduction_wei": "500000000000000000",
+    "deduction_gen": "0.5",
+    "schedule_wei": {
+      "minor": "100000000000000000",
+      "moderate": "250000000000000000",
+      "severe": "500000000000000000",
+      "missing": "1000000000000000000"
+    },
+    "reasoning": "Move-in image shows a clean, intact white wall with no defects. Move-out image reveals a large, roughly circular hole punched through the drywall in the center of the same wall, exposing the wall cavity and showing extensive cracking and torn drywall edges radiating outward. This is a severe physical defect clearly absent at move-in and far beyond ordinary wear and tear."
+  },
+  "transactions": {
+    "create_agreement": "0x34a16dfd754a7c95610036d796a5bdcc0e34c5cec0dda123b1f55440f6c0aad2",
+    "add_item": "0xb9b66391804bb0dc3de455995973f059d29f040dbd0f34a51372d0742bd8ab9b",
+    "fund_agreement": "0xd6ac2104e468445982ad4fdbaa15e6a14da832c70e7f2cb1225f0d7287301fbe",
+    "open_checkout": "0xe6d0552086fda235400ba9de3af9509c63ff78d364d80eb2ea987fc79272981d",
+    "submit_checkout_evidence": "0x9d00dd3d546f0d55cb45a1d8772f6c0644bfcb12e380ab6afc2ac3aa01a6a234",
+    "assess_item": "0xa934622ff2808edccf5ed46fd59e70ed4d0490534dc489a0b587ecf0ddb51ce1",
+    "mark_ready": "0x4a99d6ac19115103a133ebdb788460d0442b71b89f33c8d62a4bc74e9cfe5d46",
+    "settle": "0xff14d0808973445fab66aaadd0b1477d24b4ea98b9f77aacc4a9a8e904f12235",
+    "landlord_native_transfer": "0x8eca95990809fa22d25734009fac93768d8d6b01679d2844a621faaf6c854620",
+    "tenant_native_transfer": "0x86518dd0f9f5659a7ea6f8b38246ab7f9235c81d2c95b2e0018590ccb7372ab5"
+  },
+  "verification": {
+    "contract_calls": "All eight Agreement #4 contract calls above independently re-read as FINALIZED / MAJORITY_AGREE / SUCCESS / return.",
+    "settlement_pending_transfers": [
+      {
+        "recipient": "0x98ACB6B20ee0f730d0b433c6f7167de792D8a2Dd",
+        "value_wei": "500000000000000000",
+        "value_gen": "0.5"
+      },
+      {
+        "recipient": "0x95B37d7bF3F1b1B9e9a1Ae8300c627135C095375",
+        "value_wei": "500000000000000000",
+        "value_gen": "0.5"
+      }
+    ],
+    "transfer_transactions": [
+      {
+        "hash": "0x8eca95990809fa22d25734009fac93768d8d6b01679d2844a621faaf6c854620",
+        "from": "0x3f5F81618cc86604f7094E525F46f37363CD99a7",
+        "to": "0x98ACB6B20ee0f730d0b433c6f7167de792D8a2Dd",
+        "value_wei": "500000000000000000",
+        "status": "FINALIZED"
+      },
+      {
+        "hash": "0x86518dd0f9f5659a7ea6f8b38246ab7f9235c81d2c95b2e0018590ccb7372ab5",
+        "from": "0x3f5F81618cc86604f7094E525F46f37363CD99a7",
+        "to": "0x95B37d7bF3F1b1B9e9a1Ae8300c627135C095375",
+        "value_wei": "500000000000000000",
+        "status": "FINALIZED"
+      }
+    ],
+    "agreement4_accounting": "0.5 GEN landlord deduction + 0.5 GEN tenant refund = exact 1 GEN Agreement #4 deposit."
+  },
+  "historical_residual_balance": {
+    "current_contract_balance_wei": "1000000000000000000",
+    "current_contract_balance_gen": "1",
+    "source_transaction": "0xa48161b06f505bf8b3964f5f00882446a788773b6cb5edfe715e6fa6719640e7",
+    "source_transaction_value_wei": "1000000000000000000",
+    "source_transaction_result": "FINALIZED / MAJORITY_AGREE / execution ERROR / rollback",
+    "observed_context": "This earlier pre-inventory funding attempt occurred before the successful Agreement #4 add_item/funding lifecycle. Agreements 1–4 all read SETTLED, while the global contract balance remains 1 GEN. The residual is therefore documented separately from Agreement #4's fully distributed 1 GEN escrow."
+  }
+}

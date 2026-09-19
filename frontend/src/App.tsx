@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpRight, BadgeCheck, Building2, ChevronRight, CircleDollarSign, FileCheck2, Fingerprint, Gauge, Image as ImageIcon, LockKeyhole, Menu, Scale, ShieldCheck, Wallet, X } from 'lucide-react'
 import { StatusPill } from './components/StatusPill'
-import { assertSuccessfulFinalizedTransaction, CHAIN_HEX, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, explorerAddress, explorerTx, getInjectedProvider, isContractConfigured, readContract, submitContract, type WalletClient } from './lib/genlayer'
+import { CHAIN_HEX, CHAIN_ID, CONTRACT_ADDRESS, connectWallet, createInjectedWalletClient, explorerAddress, explorerTx, getAuthorizedWalletSnapshot, getInjectedProvider, inspectTransaction, isContractConfigured, readContract, submitContract, type TransactionOutcome, type WalletClient } from './lib/genlayer'
 
 type Agreement = { id: number; title: string; property_ref: string; terms_hash: string; status: string; landlord: string; tenant: string; deposit_wei: bigint | string; item_count: number; assessed_count: number; raw_deduction_wei: bigint | string; settlement_deduction_wei: bigint | string; projected_refund_wei: bigint | string; has_inconclusive: boolean; inconclusive_count: number }
 type Item = { id: number; label: string; description: string; baseline_url: string; baseline_sha256: string; checkout_url: string; checkout_sha256: string; checkout_submitter: string; evidence_challenged: boolean; replacement_url: string; replacement_proposer: string; assessed: boolean; verdict: string; severity: number; deduction_wei: bigint | string; reasoning: string; inconclusive_resolved: boolean; minor_wei: bigint | string; moderate_wei: bigint | string; severe_wei: bigint | string; missing_wei: bigint | string }
-type TxState = { stage: 'pending' | 'finalizing' | 'finalized' | 'failed'; hash?: string; message: string }
+type TxStage = 'submitted' | 'finalizing' | 'finalized' | 'failed'
+type TxState = { stage: TxStage; hash?: string; message: string }
+type TxRecord = { label: string; hash: string; agreementId: string; status: TxStage; submittedAt: number; updatedAt: number; message: string }
 const GEN = 10n ** 18n
+const ACTIVITY_KEY = 'bidframe:transaction-activity:v1'
+const LOCAL_DISCONNECT_KEY = 'bidframe:local-disconnect:v1'
 const emptyItem = { label: '', description: '', baselineUrl: '', baselineHash: '', minor: '0', moderate: '0', severe: '0', missing: '0' }
 function agreementFromUrl() { const value = new URLSearchParams(window.location.search).get('agreement') || ''; return /^\d+$/.test(value) && BigInt(value) > 0n ? value : '' }
 function isHttpsUrl(value: string) { try { return new URL(value).protocol === 'https:' } catch { return false } }
@@ -15,6 +19,21 @@ function gen(value: bigint | string | number | undefined) { return `${(Number(am
 function genWei(value: string) { if (!/^\d+(\.\d{0,18})?$/.test(value)) throw new Error('Enter a non-negative GEN amount with at most 18 decimal places.'); const [whole, fraction = ''] = value.split('.'); return BigInt(whole) * GEN + BigInt((fraction + '0'.repeat(18)).slice(0, 18)) }
 function hashFile(file: File): Promise<string> { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = async () => { try { const bytes = await crypto.subtle.digest('SHA-256', reader.result as ArrayBuffer); resolve(Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('')) } catch (e) { reject(e) } }; reader.onerror = () => reject(reader.error); reader.readAsArrayBuffer(file) }) }
 function verdictTone(value: string) { return value === 'UNCHANGED' ? 'green' : value === 'NORMAL_WEAR' ? 'slate' : value === 'NEW_DAMAGE' ? 'amber' : value === 'MISSING' ? 'red' : 'purple' }
+function loadActivity(): TxRecord[] { try { const raw = localStorage.getItem(ACTIVITY_KEY); const rows = raw ? JSON.parse(raw) : []; return Array.isArray(rows) ? rows.filter(row => row?.hash && row?.label).slice(0, 50) : [] } catch { return [] } }
+function delay(ms: number) { return new Promise(resolve => window.setTimeout(resolve, ms)) }
+async function waitForStudioFinality(hash: string, onProgress: (outcome: TransactionOutcome, attempt: number) => void | Promise<void>, onHeartbeat?: (attempt: number) => void | Promise<void>) {
+  let attempt = 0
+  while (true) {
+    const hidden = document.hidden
+    const waitMs = hidden ? 45000 : Math.min(8000 + attempt * 2000, 18000)
+    await delay(waitMs)
+    const outcome = await inspectTransaction(hash)
+    await onProgress(outcome, attempt)
+    if (outcome.state !== 'pending') return outcome
+    attempt += 1
+    if (attempt % 2 === 0) await onHeartbeat?.(attempt)
+  }
+}
 
 export default function App() {
   const [wallet, setWallet] = useState('')
@@ -28,18 +47,53 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
   const [tx, setTx] = useState<TxState | null>(null)
+  const [activity, setActivity] = useState<TxRecord[]>(loadActivity)
+  const [wrongNetwork, setWrongNetwork] = useState(false)
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const walletMenuRef = useRef<HTMLDivElement | null>(null)
+  const reconcilingRef = useRef(new Set<string>())
   const configured = isContractConfigured()
 
-  const refresh = useCallback(async (id = agreementId) => {
+  const updateActivity = useCallback((hash: string, patch: Partial<TxRecord> & Pick<TxRecord, 'hash'>) => {
+    setActivity(previous => {
+      const existing = previous.find(row => row.hash === hash)
+      const nextRecord: TxRecord = {
+        label: patch.label ?? existing?.label ?? 'StudioNet transaction',
+        hash,
+        agreementId: patch.agreementId ?? existing?.agreementId ?? '',
+        status: patch.status ?? existing?.status ?? 'submitted',
+        submittedAt: patch.submittedAt ?? existing?.submittedAt ?? Date.now(),
+        updatedAt: patch.updatedAt ?? Date.now(),
+        message: patch.message ?? existing?.message ?? 'Submitted to StudioNet.',
+      }
+      const next = [nextRecord, ...previous.filter(row => row.hash !== hash)].slice(0, 50)
+      try { localStorage.setItem(ACTIVITY_KEY, JSON.stringify(next)) } catch { /* local history is best-effort */ }
+      return next
+    })
+  }, [])
+
+  const bindActivityToAgreement = useCallback((hash: string, id: string) => {
+    if (!hash || !id) return
+    updateActivity(hash, { hash, agreementId: id, updatedAt: Date.now() })
+  }, [updateActivity])
+
+  const refresh = useCallback(async (id: string, quiet = false) => {
     if (!configured || !id) return
-    setLoading(true); setError('')
+    if (!quiet) { setLoading(true); setError('') }
     try {
       const a = await readContract<Agreement>('get_agreement', [BigInt(id)])
       const rows = await Promise.all(Array.from({ length: Number(a.item_count) }, (_, i) => readContract<Item>('get_item', [BigInt(id), BigInt(i + 1)])))
-      setAgreement({ ...a, deposit_wei: amount(a.deposit_wei), raw_deduction_wei: amount(a.raw_deduction_wei), settlement_deduction_wei: amount(a.settlement_deduction_wei), projected_refund_wei: amount(a.projected_refund_wei) }); setItems(rows)
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.') } finally { setLoading(false) }
-  }, [agreementId, configured])
-  useEffect(() => { void refresh() }, [refresh])
+      setAgreement({ ...a, deposit_wei: amount(a.deposit_wei), raw_deduction_wei: amount(a.raw_deduction_wei), settlement_deduction_wei: amount(a.settlement_deduction_wei), projected_refund_wei: amount(a.projected_refund_wei) })
+      setItems(rows)
+    } catch (e) {
+      if (!quiet) setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.')
+    } finally {
+      if (!quiet) setLoading(false)
+    }
+  }, [configured])
+
+  useEffect(() => { if (agreementId) void refresh(agreementId) }, [agreementId, refresh])
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -58,25 +112,58 @@ export default function App() {
     return () => window.removeEventListener('popstate', syncFromHistory)
   }, [])
 
+  const hydrateAuthorizedWallet = useCallback(async ({ announce = false, respectLocalDisconnect = true }: { announce?: boolean; respectLocalDisconnect?: boolean } = {}) => {
+    if (respectLocalDisconnect && sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
+    const snapshot = await getAuthorizedWalletSnapshot()
+    if (!snapshot.provider || !snapshot.address) {
+      setWallet('')
+      setClient(null)
+      setWrongNetwork(false)
+      return
+    }
+
+    setWallet(snapshot.address)
+    if (snapshot.chainId === CHAIN_HEX) {
+      setClient(createInjectedWalletClient(snapshot.provider, snapshot.address))
+      setWrongNetwork(false)
+      setError('')
+      if (announce) setNotice('Wallet session restored on GenLayer StudioNet · 61999.')
+    } else {
+      setClient(null)
+      setWrongNetwork(true)
+      if (announce) setNotice('Wallet is authorized, but writes are disabled until you switch to GenLayer StudioNet 61999.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void hydrateAuthorizedWallet().catch(e => setError(e instanceof Error ? e.message : 'Unable to restore wallet session.'))
+  }, [hydrateAuthorizedWallet])
+
   useEffect(() => {
     const provider = getInjectedProvider()
     if (!provider?.on) return
 
-    const handleAccountsChanged = () => {
-      setWallet('')
-      setClient(null)
-      setNotice('')
-      setError('Wallet account changed. Reconnect Bidframe to continue with the active account.')
+    const handleAccountsChanged = (...args: unknown[]) => {
+      if (sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
+      const supplied = Array.isArray(args[0]) ? args[0].map(String) : []
+      if (supplied.length === 0) {
+        setWallet('')
+        setClient(null)
+        setWrongNetwork(false)
+        setWalletMenuOpen(false)
+        return
+      }
+      void hydrateAuthorizedWallet({ announce: true, respectLocalDisconnect: false }).catch(e => setError(e instanceof Error ? e.message : 'Unable to update wallet account.'))
     }
     const handleChainChanged = (...args: unknown[]) => {
+      if (sessionStorage.getItem(LOCAL_DISCONNECT_KEY) === '1') return
       const chainId = String(args[0] ?? '').toLowerCase()
-      setClient(null)
-      setNotice('')
       if (chainId === CHAIN_HEX) {
-        setError('Wallet network changed to StudioNet. Reconnect Bidframe to refresh the active account.')
+        void hydrateAuthorizedWallet({ announce: true, respectLocalDisconnect: false }).catch(e => setError(e instanceof Error ? e.message : 'Unable to restore StudioNet wallet session.'))
       } else {
-        setWallet('')
-        setError(`Wallet left GenLayer StudioNet. Connect again to switch back to 61999 / ${CHAIN_HEX}.`)
+        setClient(null)
+        setWrongNetwork(true)
+        setNotice('Wallet left StudioNet. Reads remain available; reconnect to switch back to chain 61999 before writing.')
       }
     }
 
@@ -86,19 +173,176 @@ export default function App() {
       provider.removeListener?.('accountsChanged', handleAccountsChanged)
       provider.removeListener?.('chainChanged', handleChainChanged)
     }
-  }, [])
+  }, [hydrateAuthorizedWallet])
 
-  async function connect() { try { setError(''); const result = await connectWallet(); setWallet(result.address); setClient(result.client); setNotice('Connected to GenLayer StudioNet · 61999.') } catch (e) { setError(e instanceof Error ? e.message : 'Wallet connection failed.') } }
-  async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
-    if (!client) { setError('Connect an injected wallet before writing.'); return }
-    setError(''); setNotice(''); setTx({ stage: 'pending', message: `${label}: submitting to StudioNet…` })
+  useEffect(() => {
+    if (!walletMenuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (walletMenuRef.current && !walletMenuRef.current.contains(event.target as Node)) setWalletMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setWalletMenuOpen(false) }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [walletMenuOpen])
+
+  useEffect(() => {
+    if (active !== 'case' || !agreementId) return
+    const sync = () => { if (!document.hidden) void refresh(agreementId, true) }
+    const interval = window.setInterval(sync, 30000)
+    const onVisibility = () => { if (!document.hidden) sync() }
+    window.addEventListener('focus', sync)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', sync)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [active, agreementId, refresh])
+
+  useEffect(() => {
+    const pending = activity.filter(row => row.status === 'submitted' || row.status === 'finalizing')
+    for (const record of pending) {
+      if (reconcilingRef.current.has(record.hash)) continue
+      reconcilingRef.current.add(record.hash)
+      void waitForStudioFinality(
+        record.hash,
+        async (outcome, attempt) => {
+          if (outcome.state === 'pending') {
+            const message = attempt >= 2 ? 'Still finalizing on StudioNet.' : 'Submitted · waiting for StudioNet finalization.'
+            updateActivity(record.hash, { hash: record.hash, status: 'finalizing', message, updatedAt: Date.now() })
+            if (record.agreementId === agreementId) setTx({ stage: 'finalizing', hash: record.hash, message: `${record.label}: ${message}` })
+          }
+        },
+        async () => {
+          if (record.agreementId && record.agreementId === agreementId && !document.hidden) await refresh(record.agreementId, true)
+        },
+      ).then(async outcome => {
+        if (outcome.state === 'success') {
+          updateActivity(record.hash, { hash: record.hash, status: 'finalized', message: outcome.message, updatedAt: Date.now() })
+          if (record.agreementId === agreementId) {
+            setTx({ stage: 'finalized', hash: record.hash, message: `${record.label}: finalized successfully.` })
+            await refresh(record.agreementId, true)
+          }
+        } else {
+          updateActivity(record.hash, { hash: record.hash, status: 'failed', message: outcome.message, updatedAt: Date.now() })
+          if (record.agreementId === agreementId) {
+            setTx({ stage: 'failed', hash: record.hash, message: `${record.label}: ${outcome.message}` })
+            setError(`${record.label} finalized without successful execution: ${outcome.message}`)
+          }
+        }
+      }).finally(() => reconcilingRef.current.delete(record.hash))
+    }
+  }, [activity, agreementId, refresh, updateActivity])
+
+  async function connect() {
     try {
-      // SDK submission returns the canonical transaction hash; finalization can take several minutes.
-      const pending = await submitAndTrack(client, functionName, args, value, label, setTx)
-      setTx({ stage: 'finalized', hash: pending.hash, message: `${label}: finalized successfully.` }); setNotice(`${label} is finalized. State refreshed from the contract.`)
-      if (refreshId) await refresh(refreshId)
-      return { hash: pending.hash, returnValue: pending.returnValue }
-    } catch (e) { const message = e instanceof Error ? e.message : 'Transaction failed.'; setTx(current => ({ stage: 'failed', hash: current?.hash, message })); setError(message) }
+      sessionStorage.removeItem(LOCAL_DISCONNECT_KEY)
+      setError('')
+      setNotice('')
+      setWalletMenuOpen(false)
+      const result = await connectWallet()
+      setWallet(result.address)
+      setClient(result.client)
+      setWrongNetwork(false)
+      setNotice('Connected to GenLayer StudioNet · 61999.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Wallet connection failed.')
+    }
+  }
+
+  async function copyWalletAddress() {
+    if (!wallet) return
+    try {
+      await navigator.clipboard.writeText(wallet)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1400)
+    } catch {
+      setError('Unable to copy the wallet address from this browser.')
+    }
+  }
+
+  function disconnectLocal() {
+    sessionStorage.setItem(LOCAL_DISCONNECT_KEY, '1')
+    setWallet('')
+    setClient(null)
+    setWrongNetwork(false)
+    setWalletMenuOpen(false)
+    setCopied(false)
+    setNotice('')
+    setError('')
+  }
+
+  async function transact(label: string, functionName: string, args: unknown[], value = 0n, refreshId = agreementId): Promise<{ hash: string; returnValue?: unknown } | undefined> {
+    if (!client) {
+      setError(wrongNetwork ? 'Switch the wallet to GenLayer StudioNet 61999 before writing.' : 'Connect an injected wallet before writing.')
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setTx({ stage: 'submitted', message: `${label}: submitting to StudioNet…` })
+    let hash = ''
+    try {
+      const submitted = await submitContract(client, functionName, args, value)
+      hash = submitted.hash
+      const record: TxRecord = {
+        label,
+        hash,
+        agreementId: refreshId || '',
+        status: 'finalizing',
+        submittedAt: Date.now(),
+        updatedAt: Date.now(),
+        message: 'Submitted · waiting for StudioNet finalization.',
+      }
+      reconcilingRef.current.add(hash)
+      updateActivity(hash, { ...record, hash })
+      setTx({ stage: 'finalizing', hash, message: `${label}: Submitted · waiting for StudioNet finalization.` })
+
+      const outcome = await waitForStudioFinality(
+        hash,
+        async (current, attempt) => {
+          if (current.state === 'pending') {
+            const message = attempt >= 2 ? 'Still finalizing on StudioNet.' : 'Submitted · waiting for StudioNet finalization.'
+            updateActivity(hash, { hash, status: 'finalizing', message, updatedAt: Date.now() })
+            setTx({ stage: 'finalizing', hash, message: `${label}: ${message}` })
+          }
+        },
+        async () => {
+          if (refreshId && !document.hidden) await refresh(refreshId, true)
+        },
+      )
+
+      if (outcome.state === 'success') {
+        updateActivity(hash, { hash, status: 'finalized', message: outcome.message, updatedAt: Date.now() })
+        setTx({ stage: 'finalized', hash, message: `${label}: finalized successfully.` })
+        setNotice(`${label} is finalized. State refreshed from the contract.`)
+        if (refreshId) await refresh(refreshId, true)
+        return { hash }
+      }
+
+      updateActivity(hash, { hash, status: 'failed', message: outcome.message, updatedAt: Date.now() })
+      setTx({ stage: 'failed', hash, message: `${label}: ${outcome.message}` })
+      setError(`${label} finalized without successful execution: ${outcome.message}`)
+      return
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Transaction submission failed.'
+      if (hash) {
+        // Once a hash exists, uncertain RPC/read errors are reconciled rather than
+        // converted into false terminal failures.
+        updateActivity(hash, { hash, status: 'finalizing', message: 'Still finalizing on StudioNet.', updatedAt: Date.now() })
+        setTx({ stage: 'finalizing', hash, message: `${label}: Still finalizing on StudioNet.` })
+      } else {
+        setTx({ stage: 'failed', message })
+        setError(message)
+      }
+      return
+    } finally {
+      if (hash) reconcilingRef.current.delete(hash)
+    }
   }
 
   const progress = useMemo(() => agreement?.item_count ? Math.round(agreement.assessed_count / agreement.item_count * 100) : 0, [agreement])
@@ -107,26 +351,17 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar"><button className="brand" onClick={() => setActive('overview')}><span className="brand-mark"><Scale size={18} /></span><span>Bidframe</span></button>
       <nav className="desktop-nav"><button className={active === 'overview' ? 'nav-active' : ''} onClick={() => setActive('overview')}>Overview</button><button className={active === 'case' ? 'nav-active' : ''} onClick={() => setActive('case')}>Settlement case</button><button className={active === 'create' ? 'nav-active' : ''} onClick={() => setActive('create')}>New agreement</button></nav>
-      <div className="top-actions"><span className="network-chip"><span className="network-dot" /> StudioNet · {CHAIN_ID}</span><button className="wallet-btn" onClick={connect}><Wallet size={16} />{wallet ? `${wallet.slice(0, 6)}…${wallet.slice(-4)}` : 'Connect wallet'}</button><button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button></div>
+      <div className="top-actions"><span className="network-chip"><span className="network-dot" /> StudioNet · {CHAIN_ID}</span><div className="wallet-shell" ref={walletMenuRef}>{wallet && client ? <button className="wallet-btn" aria-expanded={walletMenuOpen} onClick={() => setWalletMenuOpen(open => !open)}><Wallet size={16} />{`${wallet.slice(0, 6)}…${wallet.slice(-4)}`}</button> : <button className="wallet-btn" onClick={() => void connect()}><Wallet size={16} />{wallet && wrongNetwork ? 'Switch to StudioNet' : 'Connect wallet'}</button>}{walletMenuOpen && wallet && client && <div className="wallet-menu" role="menu"><div className="wallet-menu-address"><span>Connected wallet</span><code>{wallet}</code></div><button role="menuitem" onClick={() => void copyWalletAddress()}>{copied ? 'Copied' : 'Copy address'}</button><a role="menuitem" href={explorerAddress(wallet)} target="_blank" rel="noreferrer">View wallet on StudioNet Explorer <ArrowUpRight size={13} /></a><button role="menuitem" className="wallet-disconnect" onClick={disconnectLocal}>Disconnect from Bidframe</button><small>This only clears Bidframe's local session. It does not revoke your wallet's site permission.</small></div>}</div><button className="mobile-toggle" onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button></div>
     </header>
     {mobileOpen && <div className="mobile-menu"><button onClick={() => { setActive('overview'); setMobileOpen(false) }}>Overview</button><button onClick={() => { setActive('case'); setMobileOpen(false) }}>Settlement case</button><button onClick={() => { setActive('create'); setMobileOpen(false) }}>New agreement</button></div>}
     {error && <div className="toast error-toast">{error}</div>}{notice && <div className="toast">{notice}</div>}
     {tx && <div className={`tx-banner ${tx.stage}`}><span className="tx-dot" /><b>{tx.message}</b>{tx.hash && <a href={explorerTx(tx.hash)} target="_blank" rel="noreferrer">Transaction {tx.hash.slice(0, 10)}… <ArrowUpRight size={13} /></a>}</div>}
     {!configured && <div className="demo-banner"><ShieldCheck size={15} /> Live mode is unavailable until <code>VITE_CONTRACT_ADDRESS</code> contains the deployed StudioNet 61999 contract. No sample case is shown.</div>}
     <main>{active === 'overview' && <Overview agreement={agreement} progress={progress} onOpen={() => setActive('case')} onLoad={id => { setAgreementId(id); void refresh(id); setActive('case') }} />}
-      {active === 'case' && <CaseView agreement={agreement} items={items} id={agreementId} setId={setAgreementId} loading={loading} refresh={id => void refresh(id)} transact={transact} wallet={wallet} settled={Boolean(settled)} />}
-      {active === 'create' && <CreateView connected={Boolean(wallet)} wallet={wallet} connect={connect} transact={transact} setAgreementId={setAgreementId} refresh={refresh} setActive={setActive} />}</main>
+      {active === 'case' && <CaseView agreement={agreement} items={items} id={agreementId} setId={setAgreementId} loading={loading} refresh={id => void refresh(id || agreementId)} transact={transact} wallet={wallet} settled={Boolean(settled)} activity={activity.filter(row => row.agreementId === agreementId)} />}
+      {active === 'create' && <CreateView connected={Boolean(client)} wallet={wallet} connect={connect} transact={transact} setAgreementId={setAgreementId} refresh={refresh} setActive={setActive} bindActivity={bindActivityToAgreement} />}</main>
     <footer><div className="footer-brand"><span className="brand-mark mini"><Scale size={14} /></span> Bidframe</div><p>Evidence-bound security-deposit settlement. One Intelligent Contract. StudioNet 61999.</p><div className="footer-links">{configured && <a href={explorerAddress(CONTRACT_ADDRESS)} target="_blank" rel="noreferrer">Contract <ArrowUpRight size={13} /></a>}<a href="https://studio.genlayer.com" target="_blank" rel="noreferrer">GenLayer Studio <ArrowUpRight size={13} /></a></div></footer>
   </div>
-}
-
-// Keep an immediate hash visible, then wait for the SDK's finalized receipt and verify execution success.
-async function submitAndTrack(client: WalletClient, functionName: string, args: unknown[], value: bigint, label: string, setTx: (state: TxState) => void) {
-  const { hash, finalized } = await submitContract(client, functionName, args, value)
-  setTx({ stage: 'finalizing', hash, message: `${label}: submitted; waiting for consensus finalization…` })
-  const receipt = await finalized
-  await assertSuccessfulFinalizedTransaction(hash, receipt)
-  return { hash, receipt, returnValue: receipt.data?.return_value ?? receipt.data?.result ?? receipt.data?.returnValue }
 }
 
 function Overview({ agreement, progress, onOpen, onLoad }: { agreement: Agreement | null; progress: number; onOpen: () => void; onLoad: (id: string) => void }) {
@@ -139,7 +374,7 @@ function Overview({ agreement, progress, onOpen, onLoad }: { agreement: Agreemen
 }
 function Feature({ icon, title, children }: { icon: React.ReactNode; title: string; children: string }) { return <article className="feature-card"><span className="icon-box">{icon}</span><h3>{title}</h3><p>{children}</p></article> }
 
-function CaseView({ agreement, items, id, setId, loading, refresh, transact, wallet, settled }: { agreement: Agreement | null; items: Item[]; id: string; setId: (v: string) => void; loading: boolean; refresh: (id?: string) => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string } | undefined>; wallet: string; settled: boolean }) {
+function CaseView({ agreement, items, id, setId, loading, refresh, transact, wallet, settled, activity }: { agreement: Agreement | null; items: Item[]; id: string; setId: (v: string) => void; loading: boolean; refresh: (id?: string) => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string } | undefined>; wallet: string; settled: boolean; activity: TxRecord[] }) {
   const [loadId, setLoadId] = useState(id); const [evidence, setEvidence] = useState<Record<number, { url: string; hash: string }>>({}); const [replacement, setReplacement] = useState<Record<number, { url: string; hash: string }>>({})
   const [draftItem, setDraftItem] = useState({ ...emptyItem })
   const [draftHint, setDraftHint] = useState('')
@@ -176,7 +411,7 @@ function CaseView({ agreement, items, id, setId, loading, refresh, transact, wal
       setDraftHint(e instanceof Error ? e.message : 'Unable to register inventory item.')
     }
   }
-  return <section className="page-width case-page"><div className="case-title-row"><div><span className="eyebrow">CONTRACT READS · STUDIO 61999</span><h1>{agreement?.title || 'Settlement case'}</h1><p>{agreement ? `${agreement.property_ref} · landlord ${agreement.landlord} · tenant ${agreement.tenant}` : 'Load an agreement by its on-chain ID.'}</p></div><form className="case-load" onSubmit={e => { e.preventDefault(); setId(loadId); refresh(loadId) }}><input type="number" min="1" placeholder="Agreement ID" value={loadId} onChange={e => setLoadId(e.target.value)} /><button className="secondary-btn">Load</button></form></div>
+  return <section className="page-width case-page"><div className="case-title-row"><div><span className="eyebrow">CONTRACT READS · STUDIO 61999</span><h1>{agreement?.title || 'Settlement case'}</h1><p>{agreement ? `${agreement.property_ref} · landlord ${agreement.landlord} · tenant ${agreement.tenant}` : 'Load an agreement by its on-chain ID.'}</p></div><div className="case-title-actions">{id && <button className="secondary-btn" type="button" onClick={() => refresh(id)}>Refresh state</button>}<form className="case-load" onSubmit={e => { e.preventDefault(); setId(loadId); refresh(loadId) }}><input type="number" min="1" placeholder="Agreement ID" value={loadId} onChange={e => setLoadId(e.target.value)} /><button className="secondary-btn">Load</button></form></div></div>
     {!agreement ? <div className="empty-state">{loading ? 'Reading StudioNet…' : 'No agreement loaded. Enter its ID above or create a new agreement.'}</div> : <>
       <div className="metric-grid"><Metric icon={<LockKeyhole />} label="Deposit" value={gen(agreement.deposit_wei)} sub={agreement.status} /><Metric icon={<Scale />} label="Current deduction" value={gen(agreement.settlement_deduction_wei)} sub="from frozen schedule" /><Metric icon={<BadgeCheck />} label="Assessed" value={`${agreement.assessed_count}/${agreement.item_count}`} sub={`${Math.round(agreement.assessed_count / Math.max(agreement.item_count, 1) * 100)}% complete`} /><Metric icon={<ShieldCheck />} label="Tenant refund" value={gen(agreement.projected_refund_wei)} sub={agreement.has_inconclusive ? 'INCONCLUSIVE · settlement blocked' : 'deterministic projection'} /></div>
       <div className="lifecycle-actions">
@@ -188,6 +423,7 @@ function CaseView({ agreement, items, id, setId, loading, refresh, transact, wal
         {settled && <StatusPill tone="green">Settled · deduction {gen(agreement.settlement_deduction_wei)} · refund {gen(agreement.projected_refund_wei)}</StatusPill>}
         {loading && <span>Refreshing contract state…</span>}
       </div>
+      <RecentActivity records={activity} />
       {agreement.status === 'DRAFT' && landlord && <section className="form-card draft-inventory-card">
         <div className="form-head"><div><span className="eyebrow">DRAFT AGREEMENT · LANDLORD</span><h2>Register inventory item</h2></div><ImageIcon /></div>
         <p className="empty-copy">Add one or more move-in inventory records before the tenant funds. Each successful item is stored on-chain immediately.</p>
@@ -214,13 +450,16 @@ function ItemCard({ item, agreement, wallet, evidence, replacement, setEvidence,
     <div className="schedule-line">Frozen caps · minor {gen(item.minor_wei)} · moderate {gen(item.moderate_wei)} · severe {gen(item.severe_wei)} · missing {gen(item.missing_wei)}</div></article>
 }
 function Metric({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) { return <div className="metric"><span className="metric-icon">{icon}</span><div><p>{label}</p><strong>{value}</strong><span>{sub}</span></div></div> }
+function RecentActivity({ records }: { records: TxRecord[] }) {
+  return <section className="activity-card"><div className="card-head"><div><span className="eyebrow">LOCAL BROWSER HISTORY</span><h2>Recent activity</h2></div><span className="hash-chip">{records.length} transactions</span></div><p className="activity-note">This list is transaction proof saved by this browser, not a fabricated global history. Explorer links remain authoritative.</p>{records.length === 0 ? <p className="empty-copy">No locally submitted transactions are stored for this agreement yet.</p> : <div className="activity-list">{records.slice(0, 10).map(record => <div className="activity-row" key={record.hash}><div><b>{record.label}</b><span>{new Date(record.submittedAt).toLocaleString()} · {record.message}</span></div><div className="activity-row-actions"><StatusPill tone={record.status === 'finalized' ? 'green' : record.status === 'failed' ? 'red' : 'purple'}>{record.status}</StatusPill><a href={explorerTx(record.hash)} target="_blank" rel="noreferrer">{record.hash.slice(0, 10)}… <ArrowUpRight size={12} /></a></div></div>)}</div>}</section>
+}
 
-function CreateView({ connected, wallet, connect, transact, setAgreementId, refresh, setActive }: { connected: boolean; wallet: string; connect: () => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string; returnValue?: unknown } | undefined>; setAgreementId: (id: string) => void; refresh: (id?: string) => Promise<void>; setActive: (v: 'overview' | 'case' | 'create') => void }) {
+function CreateView({ connected, wallet, connect, transact, setAgreementId, refresh, setActive, bindActivity }: { connected: boolean; wallet: string; connect: () => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string; returnValue?: unknown } | undefined>; setAgreementId: (id: string) => void; refresh: (id: string, quiet?: boolean) => Promise<void>; setActive: (v: 'overview' | 'case' | 'create') => void; bindActivity: (hash: string, id: string) => void }) {
   const [step, setStep] = useState(1); const [title, setTitle] = useState(''); const [property, setProperty] = useState(''); const [tenant, setTenant] = useState(''); const [deposit, setDeposit] = useState(''); const [termsHash, setTermsHash] = useState(''); const [items, setItems] = useState([{ ...emptyItem }]); const [createdId, setCreatedId] = useState(''); const [createTxHash, setCreateTxHash] = useState('')
   function update(index: number, key: keyof typeof emptyItem, value: string) { setItems(rows => rows.map((row, i) => i === index ? { ...row, [key]: value } : row)) }
   async function addCurrentItem() { if (!createdId) return; try { const row = items[items.length - 1]; const result = await transact(`Register inventory item ${items.length}`, 'add_item', [BigInt(createdId), row.label, row.description, row.baselineUrl, row.baselineHash, genWei(row.minor || '0'), genWei(row.moderate || '0'), genWei(row.severe || '0'), genWei(row.missing || '0')], 0n, createdId); if (result) setItems(prev => [...prev, { ...emptyItem }]) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Check GEN values and try again.') } }
   const [createHint, setCreateHint] = useState('')
-  async function createAndCapture() { try { const depositWei = genWei(deposit); if (depositWei <= 0n) throw new Error('Deposit must be greater than zero.'); const res = await transact('Create agreement', 'create_agreement', [title, property, tenant, depositWei, termsHash]); if (!res) return; setCreateTxHash(res.hash); try { const id = String(await readContract<number>('get_latest_agreement_for_landlord', [wallet])); setCreatedId(id); setAgreementId(id); setCreateHint(`Agreement #${id} finalized. Its ID is now preserved in the URL; inventory registration can continue here or from Settlement case after any reload.`) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Agreement finalized. Load its ID using the linked transaction details.') } } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Enter a valid deposit amount.') } }
+  async function createAndCapture() { try { const depositWei = genWei(deposit); if (depositWei <= 0n) throw new Error('Deposit must be greater than zero.'); const res = await transact('Create agreement', 'create_agreement', [title, property, tenant, depositWei, termsHash]); if (!res) return; setCreateTxHash(res.hash); try { const id = String(await readContract<number>('get_latest_agreement_for_landlord', [wallet])); setCreatedId(id); setAgreementId(id); bindActivity(res.hash, id); setCreateHint(`Agreement #${id} finalized. Its ID is now preserved in the URL; inventory registration can continue here or from Settlement case after any reload.`) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Agreement finalized. Load its ID using the linked transaction details.') } } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Enter a valid deposit amount.') } }
   return <section className="page-width create-page"><div className="create-intro"><StatusPill>Create agreement</StatusPill><h1>Freeze the rules before<br />the deposit moves.</h1><p>Register parties, evidence and item-specific caps first. Funding locks the schedule so later condition judgments cannot change the money.</p></div><div className="create-layout"><ol className="steps">{['Agreement', 'Inventory', 'Fund & checkout'].map((label, i) => <li key={label} className={step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}><span>{step > i + 1 ? '✓' : i + 1}</span><div><b>{label}</b><small>{i === 0 ? 'Parties & deposit' : i === 1 ? 'Evidence & frozen caps' : 'Tenant funds exact amount'}</small></div></li>)}</ol><div className="form-card">
     {step === 1 && <><div className="form-head"><div><span className="eyebrow">STEP 01</span><h2>Agreement details</h2></div><Building2 /></div><label>Agreement title<input value={title} onChange={e => setTitle(e.target.value)} /></label><div className="two-col"><label>Property reference<input value={property} onChange={e => setProperty(e.target.value)} /></label><label>Deposit (GEN)<input type="number" min="0.000000000000000001" step="0.000000000000000001" value={deposit} onChange={e => setDeposit(e.target.value)} /></label></div><label>Tenant wallet<input placeholder="0x…" value={tenant} onChange={e => setTenant(e.target.value)} /></label><label>Frozen terms SHA-256<input placeholder="64 hex characters" value={termsHash} onChange={e => setTermsHash(e.target.value)} /></label><div className="form-note"><LockKeyhole size={16} />Terms and deposit become immutable when the tenant funds.</div></>}
     {step === 2 && <><div className="form-head"><div><span className="eyebrow">STEP 02</span><h2>Register inventory</h2></div><ImageIcon /></div>{items.map((item, i) => <div className="inventory-form" key={i}><h3>Item {i + 1}</h3><label>Item label<input value={item.label} onChange={e => update(i, 'label', e.target.value)} /></label><label>Description<input value={item.description} onChange={e => update(i, 'description', e.target.value)} /></label><label>Baseline HTTPS evidence URL<input type="url" value={item.baselineUrl} onChange={e => update(i, 'baselineUrl', e.target.value)} /></label><label>Baseline image file for SHA-256<input type="file" accept="image/*" onChange={async e => { const f = e.target.files?.[0]; if (f) update(i, 'baselineHash', await hashFile(f)) }} /></label><label>Baseline SHA-256<input value={item.baselineHash} onChange={e => update(i, 'baselineHash', e.target.value)} /></label><div className="four-col">{(['minor', 'moderate', 'severe', 'missing'] as const).map(k => <label key={k}>{k}<input type="number" min="0" step="any" value={item[k]} onChange={e => update(i, k, e.target.value)} /></label>)}</div><div className="form-note"><ShieldCheck size={16} />The values above are frozen GEN caps. Ordinary wear and unchanged condition always deduct zero.</div></div>)}</>}
