@@ -4,7 +4,7 @@
 
 Bidframe is a single Intelligent Contract plus a reviewer-facing web application for settling security deposits from sealed before/after evidence. A landlord defines the parties, deposit, inventory, move-in evidence hashes, and item-level deduction schedule before funds are locked. At checkout, GenLayer validators inspect the exact evidence bytes and return only a bounded condition classification. The contract converts that classification into a deterministic deduction and never lets the model invent a price, recipient, item, or payout.
 
-> Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. The live frontend is https://bidframe-seven.vercel.app/. Contract lint, 19 Direct Mode tests, frontend typecheck/build, and submission fingerprinting are CI gates. Live proof includes exact 1 GEN funding, `UNCHANGED`, challenge blocking, zero-deduction recovery, settlement/refund, and repeat-settlement rollback. A successful `NEW_DAMAGE` finding with a nonzero landlord payout remains the final economic proof required before submission readiness.
+> Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. The live frontend is https://bidframe-seven.vercel.app/. Live proof now covers both sides of the settlement design: Agreement #3 proves `UNCHANGED`, validator disagreement fail-closed behavior, challenge recovery, zero-deduction settlement and repeat-settlement rollback; Agreement #4 proves `NEW_DAMAGE` severity 3, the frozen 0.5 GEN severe deduction, READY → SETTLED, a 0.5 GEN landlord payment and 0.5 GEN tenant refund from an exact 1 GEN deposit. Exact proof is recorded in `docs/SUBMISSION.md` and `docs/studionet-new-damage-lifecycle.json`.
 
 ## Why GenLayer
 
@@ -53,7 +53,7 @@ Do not substitute Studio development preview (`61997`) or Bradbury.
 
 ## Frontend
 
-The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical StudioNet address. `VITE_CONTRACT_ADDRESS` can override the pinned canonical address for a future redeployment. The wallet path uses injected EIP-1193 providers only: it requests accounts, switches/adds StudioNet 61999 when needed, verifies `eth_chainId` after the wallet prompt, and then creates the provider-backed GenLayer client without requesting MetaMask Snaps. Wallet writes wait for finalized successful execution before refreshing state.
+The Vite/React frontend keeps the purple + white design and uses live contract reads at the canonical StudioNet address. `VITE_CONTRACT_ADDRESS` can override the pinned canonical address for a future redeployment. The wallet path uses injected EIP-1193 providers only: explicit Connect requests accounts and switches/adds StudioNet 61999 when needed, while page-load hydration uses non-intrusive `eth_accounts` + `eth_chainId` to restore an already-authorized StudioNet session without opening a wallet prompt. The frontend does not request MetaMask Snaps. Submitted transaction hashes are persisted immediately, reconciled against StudioNet until a terminal finalized result, and kept in local Recent activity so an RPC wait timeout is not misreported as a failed transaction.
 
 ```bash
 cd frontend
@@ -78,6 +78,8 @@ The UI is purple/white, responsive, and exposes:
 - block READY while an item is incomplete or has an unresolved `INCONCLUSIVE`; expose zero-deduction recovery for challenged or inconclusive evidence;
 - mark ready, settle, and show final deduction/refund state;
 - connect an injected EIP-1193 wallet to StudioNet 61999;
+- restore already-authorized StudioNet wallet sessions without a popup, expose a copy/explorer/local-disconnect wallet menu, and automatically rebuild the write client after account/network changes when safe;
+- persist submitted transaction hashes and local recent activity across reloads, keep timeouts in a non-terminal finalizing state, reconcile with StudioNet using conservative polling, and refresh loaded agreement state on finalization/focus/visibility changes;
 - show transaction progress and link transactions/contracts to the Studio explorer.
 
 ## Contract workflow
@@ -113,7 +115,7 @@ genlayer network info
 genlayer deploy --contract contracts/Bidframe.py
 ```
 
-Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. The only remaining submission proof is a finalized `NEW_DAMAGE` consensus result with the corresponding frozen nonzero deduction and native GEN landlord/tenant transfer evidence.
+Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. Agreement #4 provides the positive economic proof: finalized `NEW_DAMAGE` severity 3, deterministic 0.5 GEN deduction, and finalized 0.5 GEN / 0.5 GEN native transfers to landlord and tenant. A separate historical StudioNet residual-balance observation from an earlier rolled-back pre-inventory funding attempt is documented transparently in the submission evidence and threat model; it is not counted as Agreement #4 escrow.
 
 ## License
 
