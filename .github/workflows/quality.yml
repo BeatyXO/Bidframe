@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - fix/liveness-recovery
+      - fix/live-wallet-and-submission
   pull_request:
     branches:
       - main
@@ -47,6 +48,6 @@ jobs:
         run: npm run typecheck
       - name: Production build
         env:
-          VITE_CONTRACT_ADDRESS: 0x3f5F81618cc86604f7094E525F46f37363CD99a7
-          VITE_EXPLORER_BASE: https://explorer-studio.genlayer.com
+          VITE_CONTRACT_ADDRESS: '0x3f5F81618cc86604f7094E525F46f37363CD99a7'
+          VITE_EXPLORER_BASE: 'https://explorer-studio.genlayer.com'
         run: npm run build
