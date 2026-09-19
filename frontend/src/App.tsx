@@ -8,6 +8,8 @@ type Item = { id: number; label: string; description: string; baseline_url: stri
 type TxState = { stage: 'pending' | 'finalizing' | 'finalized' | 'failed'; hash?: string; message: string }
 const GEN = 10n ** 18n
 const emptyItem = { label: '', description: '', baselineUrl: '', baselineHash: '', minor: '0', moderate: '0', severe: '0', missing: '0' }
+function agreementFromUrl() { const value = new URLSearchParams(window.location.search).get('agreement') || ''; return /^\d+$/.test(value) && BigInt(value) > 0n ? value : '' }
+function isHttpsUrl(value: string) { try { return new URL(value).protocol === 'https:' } catch { return false } }
 function amount(value: bigint | string | number | undefined) { return BigInt(value ?? 0) }
 function gen(value: bigint | string | number | undefined) { return `${(Number(amount(value)) / Number(GEN)).toFixed(3)} GEN` }
 function genWei(value: string) { if (!/^\d+(\.\d{0,18})?$/.test(value)) throw new Error('Enter a non-negative GEN amount with at most 18 decimal places.'); const [whole, fraction = ''] = value.split('.'); return BigInt(whole) * GEN + BigInt((fraction + '0'.repeat(18)).slice(0, 18)) }
@@ -20,8 +22,8 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [active, setActive] = useState<'overview' | 'case' | 'create'>('overview')
-  const [agreementId, setAgreementId] = useState('')
+  const [active, setActive] = useState<'overview' | 'case' | 'create'>(() => agreementFromUrl() ? 'case' : 'overview')
+  const [agreementId, setAgreementId] = useState(agreementFromUrl)
   const [agreement, setAgreement] = useState<Agreement | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
@@ -38,6 +40,23 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to read agreement from StudioNet.') } finally { setLoading(false) }
   }, [agreementId, configured])
   useEffect(() => { void refresh() }, [refresh])
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (agreementId) url.searchParams.set('agreement', agreementId)
+    else url.searchParams.delete('agreement')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [agreementId])
+
+  useEffect(() => {
+    const syncFromHistory = () => {
+      const linkedId = agreementFromUrl()
+      setAgreementId(linkedId)
+      if (linkedId) setActive('case')
+    }
+    window.addEventListener('popstate', syncFromHistory)
+    return () => window.removeEventListener('popstate', syncFromHistory)
+  }, [])
 
   useEffect(() => {
     const provider = getInjectedProvider()
@@ -122,12 +141,69 @@ function Feature({ icon, title, children }: { icon: React.ReactNode; title: stri
 
 function CaseView({ agreement, items, id, setId, loading, refresh, transact, wallet, settled }: { agreement: Agreement | null; items: Item[]; id: string; setId: (v: string) => void; loading: boolean; refresh: (id?: string) => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string } | undefined>; wallet: string; settled: boolean }) {
   const [loadId, setLoadId] = useState(id); const [evidence, setEvidence] = useState<Record<number, { url: string; hash: string }>>({}); const [replacement, setReplacement] = useState<Record<number, { url: string; hash: string }>>({})
+  const [draftItem, setDraftItem] = useState({ ...emptyItem })
+  const [draftHint, setDraftHint] = useState('')
   const setEvidenceHash = async (itemId: number, field: 'evidence' | 'replacement', file?: File) => { if (!file) return; const hash = await hashFile(file); (field === 'evidence' ? setEvidence : setReplacement)(state => ({ ...state, [itemId]: { ...state[itemId], hash } })) }
   const ready = Boolean(agreement && agreement.item_count > 0 && agreement.assessed_count === agreement.item_count && !agreement.has_inconclusive)
+  const landlord = Boolean(wallet && agreement && wallet.toLowerCase() === agreement.landlord.toLowerCase())
+  const tenant = Boolean(wallet && agreement && wallet.toLowerCase() === agreement.tenant.toLowerCase())
+  function updateDraftItem(key: keyof typeof emptyItem, value: string) { setDraftItem(row => ({ ...row, [key]: value })) }
+  async function registerDraftItem() {
+    if (!agreement || agreement.status !== 'DRAFT' || !landlord) return
+    setDraftHint('')
+    try {
+      if (!draftItem.label.trim()) throw new Error('Item label is required.')
+      if (!draftItem.description.trim()) throw new Error('Item description is required.')
+      if (!isHttpsUrl(draftItem.baselineUrl)) throw new Error('Baseline evidence URL must use HTTPS.')
+      if (!/^[a-fA-F0-9]{64}$/.test(draftItem.baselineHash)) throw new Error('Baseline SHA-256 must be exactly 64 hexadecimal characters.')
+      const args = [
+        BigInt(agreement.id),
+        draftItem.label.trim(),
+        draftItem.description.trim(),
+        draftItem.baselineUrl.trim(),
+        draftItem.baselineHash.toLowerCase(),
+        genWei(draftItem.minor || '0'),
+        genWei(draftItem.moderate || '0'),
+        genWei(draftItem.severe || '0'),
+        genWei(draftItem.missing || '0'),
+      ]
+      const result = await transact('Register inventory item', 'add_item', args, 0n, String(agreement.id))
+      if (result) {
+        setDraftItem({ ...emptyItem })
+        setDraftHint(`Inventory item finalized. Agreement #${agreement.id} was refreshed from StudioNet.`)
+      }
+    } catch (e) {
+      setDraftHint(e instanceof Error ? e.message : 'Unable to register inventory item.')
+    }
+  }
   return <section className="page-width case-page"><div className="case-title-row"><div><span className="eyebrow">CONTRACT READS · STUDIO 61999</span><h1>{agreement?.title || 'Settlement case'}</h1><p>{agreement ? `${agreement.property_ref} · landlord ${agreement.landlord} · tenant ${agreement.tenant}` : 'Load an agreement by its on-chain ID.'}</p></div><form className="case-load" onSubmit={e => { e.preventDefault(); setId(loadId); refresh(loadId) }}><input type="number" min="1" placeholder="Agreement ID" value={loadId} onChange={e => setLoadId(e.target.value)} /><button className="secondary-btn">Load</button></form></div>
     {!agreement ? <div className="empty-state">{loading ? 'Reading StudioNet…' : 'No agreement loaded. Enter its ID above or create a new agreement.'}</div> : <>
       <div className="metric-grid"><Metric icon={<LockKeyhole />} label="Deposit" value={gen(agreement.deposit_wei)} sub={agreement.status} /><Metric icon={<Scale />} label="Current deduction" value={gen(agreement.settlement_deduction_wei)} sub="from frozen schedule" /><Metric icon={<BadgeCheck />} label="Assessed" value={`${agreement.assessed_count}/${agreement.item_count}`} sub={`${Math.round(agreement.assessed_count / Math.max(agreement.item_count, 1) * 100)}% complete`} /><Metric icon={<ShieldCheck />} label="Tenant refund" value={gen(agreement.projected_refund_wei)} sub={agreement.has_inconclusive ? 'INCONCLUSIVE · settlement blocked' : 'deterministic projection'} /></div>
-      <div className="lifecycle-actions">{agreement.status === 'DRAFT' && wallet.toLowerCase() === agreement.tenant.toLowerCase() && <button className="primary-btn" onClick={() => void transact('Fund exact deposit', 'fund_agreement', [BigInt(id)], amount(agreement.deposit_wei))}>Fund exact deposit · {gen(agreement.deposit_wei)}</button>}{agreement.status === 'ACTIVE' && <button className="secondary-btn" onClick={() => void transact('Open checkout', 'open_checkout', [BigInt(id)])}>Open checkout</button>}{agreement.status === 'ASSESSING' && <button className="primary-btn" disabled={!ready} title={!ready ? 'Every item must be assessed and none may be INCONCLUSIVE.' : ''} onClick={() => void transact('Mark READY', 'mark_ready', [BigInt(id)])}>Mark READY</button>}{agreement.status === 'READY' && <button className="primary-btn" onClick={() => void transact('Settle', 'settle', [BigInt(id)])}>Settle agreement</button>}{settled && <StatusPill tone="green">Settled · deduction {gen(agreement.settlement_deduction_wei)} · refund {gen(agreement.projected_refund_wei)}</StatusPill>}{loading && <span>Refreshing contract state…</span>}</div>
+      <div className="lifecycle-actions">
+        {agreement.status === 'DRAFT' && tenant && agreement.item_count > 0 && <button className="primary-btn" onClick={() => void transact('Fund exact deposit', 'fund_agreement', [BigInt(agreement.id)], amount(agreement.deposit_wei), String(agreement.id))}>Fund exact deposit · {gen(agreement.deposit_wei)}</button>}
+        {agreement.status === 'DRAFT' && tenant && agreement.item_count === 0 && <div className="draft-gate-message"><LockKeyhole size={16} /><span>Landlord must register at least one inventory item before funding.</span></div>}
+        {agreement.status === 'ACTIVE' && <button className="secondary-btn" onClick={() => void transact('Open checkout', 'open_checkout', [BigInt(agreement.id)], 0n, String(agreement.id))}>Open checkout</button>}
+        {agreement.status === 'ASSESSING' && <button className="primary-btn" disabled={!ready} title={!ready ? 'Every item must be assessed and none may be INCONCLUSIVE.' : ''} onClick={() => void transact('Mark READY', 'mark_ready', [BigInt(agreement.id)], 0n, String(agreement.id))}>Mark READY</button>}
+        {agreement.status === 'READY' && <button className="primary-btn" onClick={() => void transact('Settle', 'settle', [BigInt(agreement.id)], 0n, String(agreement.id))}>Settle agreement</button>}
+        {settled && <StatusPill tone="green">Settled · deduction {gen(agreement.settlement_deduction_wei)} · refund {gen(agreement.projected_refund_wei)}</StatusPill>}
+        {loading && <span>Refreshing contract state…</span>}
+      </div>
+      {agreement.status === 'DRAFT' && landlord && <section className="form-card draft-inventory-card">
+        <div className="form-head"><div><span className="eyebrow">DRAFT AGREEMENT · LANDLORD</span><h2>Register inventory item</h2></div><ImageIcon /></div>
+        <p className="empty-copy">Add one or more move-in inventory records before the tenant funds. Each successful item is stored on-chain immediately.</p>
+        <div className="inventory-form">
+          <label>Item label<input value={draftItem.label} onChange={e => updateDraftItem('label', e.target.value)} placeholder="e.g. Living-room window" /></label>
+          <label>Description<input value={draftItem.description} onChange={e => updateDraftItem('description', e.target.value)} placeholder="Condition and identifying details at move-in" /></label>
+          <label>Baseline HTTPS evidence URL<input type="url" value={draftItem.baselineUrl} onChange={e => updateDraftItem('baselineUrl', e.target.value)} placeholder="https://…" /></label>
+          <label>Baseline image file for browser SHA-256<input type="file" accept="image/*" onChange={async e => { const file = e.target.files?.[0]; if (file) updateDraftItem('baselineHash', await hashFile(file)) }} /></label>
+          <label>Baseline SHA-256<input value={draftItem.baselineHash} onChange={e => updateDraftItem('baselineHash', e.target.value)} placeholder="64 hexadecimal characters" /></label>
+          {draftItem.baselineHash && <code>SHA-256 {draftItem.baselineHash}</code>}
+          <div className="four-col">{(['minor', 'moderate', 'severe', 'missing'] as const).map(key => <label key={key}>{key} deduction (GEN)<input type="number" min="0" step="any" value={draftItem[key]} onChange={e => updateDraftItem(key, e.target.value)} /></label>)}</div>
+          <div className="form-note"><ShieldCheck size={16} />These GEN amounts are the frozen deterministic schedule. UNCHANGED and NORMAL_WEAR always deduct zero.</div>
+          {draftHint && <p className="draft-hint">{draftHint}</p>}
+          <button className="primary-btn" disabled={!draftItem.label.trim() || !draftItem.description.trim() || !isHttpsUrl(draftItem.baselineUrl) || !/^[a-fA-F0-9]{64}$/.test(draftItem.baselineHash)} onClick={() => void registerDraftItem()}>Register inventory item</button>
+        </div>
+      </section>}
       <div className="case-grid"><div className="evidence-card"><div className="card-head"><div><span className="eyebrow">EVIDENCE MATRIX</span><h2>Registered inventory</h2></div><span className="hash-chip">Terms {agreement.terms_hash.slice(0, 10)}…</span></div>{items.length === 0 ? <p className="empty-copy">No inventory items have been registered.</p> : items.map(item => <ItemCard key={item.id} item={item} agreement={agreement} wallet={wallet} evidence={evidence[item.id] || { url: '', hash: '' }} replacement={replacement[item.id] || { url: '', hash: '' }} setEvidence={value => setEvidence(s => ({ ...s, [item.id]: value }))} setReplacement={value => setReplacement(s => ({ ...s, [item.id]: value }))} setEvidenceHash={file => void setEvidenceHash(item.id, 'evidence', file)} setReplacementHash={file => void setEvidenceHash(item.id, 'replacement', file)} transact={(label, fn, args) => void transact(label, fn, args)} />)}</div><aside className="settlement-card"><span className="eyebrow">{settled ? 'FINAL SETTLEMENT' : 'PROJECTED SETTLEMENT'}</span><h3>{gen(agreement.projected_refund_wei)}</h3><p>{settled ? 'refunded to tenant' : 'projected tenant refund'}</p><div className="settlement-bar"><i style={{ width: `${Math.min(100, Number(amount(agreement.settlement_deduction_wei) * 100n / (amount(agreement.deposit_wei) || 1n)))}%` }} /></div><dl><div><dt>Deposit</dt><dd>{gen(agreement.deposit_wei)}</dd></div><div><dt>Landlord deduction</dt><dd>− {gen(agreement.settlement_deduction_wei)}</dd></div><div className="total"><dt>Tenant refund</dt><dd>{gen(agreement.projected_refund_wei)}</dd></div></dl><div className="notice"><ShieldCheck size={17} /><p><b>{agreement.has_inconclusive ? 'Automatic settlement blocked.' : ready || settled ? 'All evidence resolved.' : 'Settlement remains locked.'}</b> {!ready && !settled && 'Every item must be assessed and no item may be INCONCLUSIVE.'}</p></div></aside></div>
     </>}</section>
 }
@@ -140,15 +216,15 @@ function ItemCard({ item, agreement, wallet, evidence, replacement, setEvidence,
 function Metric({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub: string }) { return <div className="metric"><span className="metric-icon">{icon}</span><div><p>{label}</p><strong>{value}</strong><span>{sub}</span></div></div> }
 
 function CreateView({ connected, wallet, connect, transact, setAgreementId, refresh, setActive }: { connected: boolean; wallet: string; connect: () => void; transact: (label: string, fn: string, args: unknown[], value?: bigint, id?: string) => Promise<{ hash: string; returnValue?: unknown } | undefined>; setAgreementId: (id: string) => void; refresh: (id?: string) => Promise<void>; setActive: (v: 'overview' | 'case' | 'create') => void }) {
-  const [step, setStep] = useState(1); const [title, setTitle] = useState(''); const [property, setProperty] = useState(''); const [tenant, setTenant] = useState(''); const [deposit, setDeposit] = useState(''); const [termsHash, setTermsHash] = useState(''); const [items, setItems] = useState([{ ...emptyItem }]); const [createdId, setCreatedId] = useState('')
+  const [step, setStep] = useState(1); const [title, setTitle] = useState(''); const [property, setProperty] = useState(''); const [tenant, setTenant] = useState(''); const [deposit, setDeposit] = useState(''); const [termsHash, setTermsHash] = useState(''); const [items, setItems] = useState([{ ...emptyItem }]); const [createdId, setCreatedId] = useState(''); const [createTxHash, setCreateTxHash] = useState('')
   function update(index: number, key: keyof typeof emptyItem, value: string) { setItems(rows => rows.map((row, i) => i === index ? { ...row, [key]: value } : row)) }
   async function addCurrentItem() { if (!createdId) return; try { const row = items[items.length - 1]; const result = await transact(`Register inventory item ${items.length}`, 'add_item', [BigInt(createdId), row.label, row.description, row.baselineUrl, row.baselineHash, genWei(row.minor || '0'), genWei(row.moderate || '0'), genWei(row.severe || '0'), genWei(row.missing || '0')], 0n, createdId); if (result) setItems(prev => [...prev, { ...emptyItem }]) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Check GEN values and try again.') } }
   const [createHint, setCreateHint] = useState('')
-  async function createAndCapture() { try { const depositWei = genWei(deposit); if (depositWei <= 0n) throw new Error('Deposit must be greater than zero.'); const res = await transact('Create agreement', 'create_agreement', [title, property, tenant, depositWei, termsHash]); if (!res) return; try { const id = String(await readContract<number>('get_latest_agreement_for_landlord', [wallet])); setCreatedId(id); setAgreementId(id); setCreateHint(`Agreement #${id} finalized. Register each inventory item, then ask the tenant to connect their wallet and fund the exact deposit.`) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Agreement finalized. Load its ID using the transaction details.') } } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Enter a valid deposit amount.') } }
+  async function createAndCapture() { try { const depositWei = genWei(deposit); if (depositWei <= 0n) throw new Error('Deposit must be greater than zero.'); const res = await transact('Create agreement', 'create_agreement', [title, property, tenant, depositWei, termsHash]); if (!res) return; setCreateTxHash(res.hash); try { const id = String(await readContract<number>('get_latest_agreement_for_landlord', [wallet])); setCreatedId(id); setAgreementId(id); setCreateHint(`Agreement #${id} finalized. Its ID is now preserved in the URL; inventory registration can continue here or from Settlement case after any reload.`) } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Agreement finalized. Load its ID using the linked transaction details.') } } catch (e) { setCreateHint(e instanceof Error ? e.message : 'Enter a valid deposit amount.') } }
   return <section className="page-width create-page"><div className="create-intro"><StatusPill>Create agreement</StatusPill><h1>Freeze the rules before<br />the deposit moves.</h1><p>Register parties, evidence and item-specific caps first. Funding locks the schedule so later condition judgments cannot change the money.</p></div><div className="create-layout"><ol className="steps">{['Agreement', 'Inventory', 'Fund & checkout'].map((label, i) => <li key={label} className={step === i + 1 ? 'active' : step > i + 1 ? 'done' : ''}><span>{step > i + 1 ? '✓' : i + 1}</span><div><b>{label}</b><small>{i === 0 ? 'Parties & deposit' : i === 1 ? 'Evidence & frozen caps' : 'Tenant funds exact amount'}</small></div></li>)}</ol><div className="form-card">
     {step === 1 && <><div className="form-head"><div><span className="eyebrow">STEP 01</span><h2>Agreement details</h2></div><Building2 /></div><label>Agreement title<input value={title} onChange={e => setTitle(e.target.value)} /></label><div className="two-col"><label>Property reference<input value={property} onChange={e => setProperty(e.target.value)} /></label><label>Deposit (GEN)<input type="number" min="0.000000000000000001" step="0.000000000000000001" value={deposit} onChange={e => setDeposit(e.target.value)} /></label></div><label>Tenant wallet<input placeholder="0x…" value={tenant} onChange={e => setTenant(e.target.value)} /></label><label>Frozen terms SHA-256<input placeholder="64 hex characters" value={termsHash} onChange={e => setTermsHash(e.target.value)} /></label><div className="form-note"><LockKeyhole size={16} />Terms and deposit become immutable when the tenant funds.</div></>}
     {step === 2 && <><div className="form-head"><div><span className="eyebrow">STEP 02</span><h2>Register inventory</h2></div><ImageIcon /></div>{items.map((item, i) => <div className="inventory-form" key={i}><h3>Item {i + 1}</h3><label>Item label<input value={item.label} onChange={e => update(i, 'label', e.target.value)} /></label><label>Description<input value={item.description} onChange={e => update(i, 'description', e.target.value)} /></label><label>Baseline HTTPS evidence URL<input type="url" value={item.baselineUrl} onChange={e => update(i, 'baselineUrl', e.target.value)} /></label><label>Baseline image file for SHA-256<input type="file" accept="image/*" onChange={async e => { const f = e.target.files?.[0]; if (f) update(i, 'baselineHash', await hashFile(f)) }} /></label><label>Baseline SHA-256<input value={item.baselineHash} onChange={e => update(i, 'baselineHash', e.target.value)} /></label><div className="four-col">{(['minor', 'moderate', 'severe', 'missing'] as const).map(k => <label key={k}>{k}<input type="number" min="0" step="any" value={item[k]} onChange={e => update(i, k, e.target.value)} /></label>)}</div><div className="form-note"><ShieldCheck size={16} />The values above are frozen GEN caps. Ordinary wear and unchanged condition always deduct zero.</div></div>)}</>}
-    {step === 3 && <><div className="form-head"><div><span className="eyebrow">STEP 03</span><h2>Finalize agreement</h2></div><FileCheck2 /></div><div className="review-box"><div><span>Deposit</span><strong>{deposit || '—'} GEN</strong></div><div><span>Inventory ready</span><strong>{items.length - (createdId ? 1 : 0)} items</strong></div><div><span>Network</span><strong>StudioNet · 61999</strong></div><div><span>Contract</span><strong>One Intelligent Contract</strong></div></div>{!connected ? <button className="primary-btn wide" onClick={connect}><Wallet size={17} /> Connect landlord wallet</button> : !createdId ? <button className="primary-btn wide" disabled={!isContractConfigured() || !title || !property || !tenant || !deposit || !/^[a-fA-F0-9]{64}$/.test(termsHash)} onClick={() => void createAndCapture()}>Create agreement on StudioNet</button> : <><p>{createHint}</p><button className="primary-btn wide" onClick={() => void addCurrentItem()} disabled={!items[items.length - 1].label || !items[items.length - 1].baselineHash}>Register item {items.length} on StudioNet</button><button className="secondary-btn wide" onClick={() => { setAgreementId(createdId); void refresh(createdId); setActive('case') }}>Open agreement case</button></>}</>}
+    {step === 3 && <><div className="form-head"><div><span className="eyebrow">STEP 03</span><h2>Finalize agreement</h2></div><FileCheck2 /></div><div className="review-box"><div><span>Deposit</span><strong>{deposit || '—'} GEN</strong></div><div><span>Inventory ready</span><strong>{items.length - (createdId ? 1 : 0)} items</strong></div><div><span>Network</span><strong>StudioNet · 61999</strong></div><div><span>Contract</span><strong>One Intelligent Contract</strong></div></div>{!connected ? <button className="primary-btn wide" onClick={connect}><Wallet size={17} /> Connect landlord wallet</button> : !createdId ? <button className="primary-btn wide" disabled={!isContractConfigured() || !title || !property || !tenant || !deposit || !/^[a-fA-F0-9]{64}$/.test(termsHash)} onClick={() => void createAndCapture()}>Create agreement on StudioNet</button> : <><p>{createHint}</p>{createTxHash && <a className="receipt-link" href={explorerTx(createTxHash)} target="_blank" rel="noreferrer">Creation transaction {createTxHash.slice(0, 12)}… <ArrowUpRight size={14} /></a>}<button className="secondary-btn wide" onClick={() => void addCurrentItem()} disabled={!items[items.length - 1].label || !items[items.length - 1].description || !isHttpsUrl(items[items.length - 1].baselineUrl) || !/^[a-fA-F0-9]{64}$/.test(items[items.length - 1].baselineHash)}>Register prepared item {items.length} here</button><button className="primary-btn wide" onClick={() => { setAgreementId(createdId); void refresh(createdId); setActive('case') }}>Continue registering inventory</button><a className="secondary-btn wide" href={`?agreement=${createdId}`}>Open agreement #{createdId}</a></>}</>}
     <div className="form-actions"><button className="secondary-btn" disabled={step === 1} onClick={() => setStep(s => Math.max(1, s - 1))}>Back</button>{step < 3 && <button className="primary-btn" disabled={step === 1 && (!title || !property || !tenant || !deposit || !/^[a-fA-F0-9]{64}$/.test(termsHash))} onClick={() => setStep(s => Math.min(3, s + 1))}>Continue <ChevronRight size={16} /></button>}</div>
     </div></div></section>
 }
