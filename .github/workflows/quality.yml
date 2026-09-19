@@ -17,10 +17,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Direct Mode tooling
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Install contract tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "genvm-linter @ git+https://github.com/genlayerlabs/genvm-linter@main"
+      - name: GenVM lint
+        run: genvm-lint check contracts/Bidframe.py
       - name: Direct Mode tests
         run: pytest tests/test_bidframe.py -v --tb=short
+      - name: Submission source fingerprint
+        run: python scripts/verify_submission.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -32,9 +39,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
       - name: Production build
+        env:
+          VITE_CONTRACT_ADDRESS: 0x3f5F81618cc86604f7094E525F46f37363CD99a7
+          VITE_EXPLORER_BASE: https://explorer-studio.genlayer.com
         run: npm run build
