@@ -29,7 +29,7 @@ ASSESSING
    |
    | one consensus assessment per item
    v
-READY  (only if every item resolved and none is INCONCLUSIVE)
+READY  (only if every item is resolved and no unresolved INCONCLUSIVE remains)
    |
    | deterministic payout messages
    v
@@ -75,13 +75,13 @@ The model never outputs a monetary amount.
 - `NEW_DAMAGE` severity 2 = frozen moderate deduction
 - `NEW_DAMAGE` severity 3 = frozen severe deduction
 - `MISSING` = frozen missing deduction
-- `INCONCLUSIVE` = blocks settlement
+- `INCONCLUSIVE` = blocks settlement until explicitly resolved at zero deduction
 
 If raw deductions exceed the deposit, the settlement deduction is capped at the exact deposit. The remaining amount is the tenant refund.
 
 ## Disputed evidence
 
-Before assessment, the counterparty can challenge submitted move-out evidence. The challenged item cannot be adjudicated. A replacement is only activated when proposed by one party and accepted by the other. After assessment, disputes should use GenLayer's protocol-level appeal mechanism rather than mutating contract evidence/state behind an accepted decision.
+Before assessment, the counterparty can challenge submitted move-out evidence. The challenged item cannot be adjudicated. A replacement is only activated when proposed by one party and accepted by the other. To prevent a challenge from trapping the deposit, either party may resolve the challenged item conservatively at zero deduction. Likewise, a finalized `INCONCLUSIVE` verdict can be released at zero deduction. These recovery paths can never create or increase a landlord charge.
 
 ## Native value flow
 
