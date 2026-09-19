@@ -17,10 +17,12 @@ Bidframe assumes two economically opposed parties and potentially adversarial pu
 | Repeated settlement drains funds | `settle` changes state to `SETTLED` before emitting value transfers; subsequent calls fail the state guard. |
 | Frontend shows a submitted tx as success before consensus | Integration must wait for GenLayer finalization and verify successful execution before refreshing durable state. |
 
-## Known limitations before submission
+## Current residual risks and submission evidence gaps
 
-1. The previous StudioNet deployment predates the liveness fixes and is superseded; the revised contract requires a fresh canonical StudioNet 61999 deployment.
-2. Native GEN funding and emitted settlement transfers still need live StudioNet balance/transaction proof on the revised deployment.
-3. Direct Mode covers `INCONCLUSIVE` blocking and validator disagreement; a real ambiguous image case remains useful deployment evidence.
-4. URLs are HTTPS + hash-bound, but availability remains external. Unavailable sources intentionally fail closed rather than being treated as evidence.
+1. The revised contract is canonically deployed to StudioNet 61999 and source parity is verified. Exact 1 GEN funding, zero-deduction settlement/refund, and repeat-settlement rollback have live transaction evidence.
+2. The remaining economic proof gap is a finalized `NEW_DAMAGE` assessment that reaches validator consensus and produces a nonzero frozen deduction, followed by a successful landlord payment and tenant remainder.
+3. The challenged-evidence escape hatch is intentionally claimant-conservative: either agreement party may resolve a challenged item at zero deduction. Economically, an unresolved dispute cannot be converted into a landlord charge; the claimant must obtain accepted replacement evidence or a successful assessment to support a deduction.
+4. Direct Mode covers `INCONCLUSIVE` blocking and validator disagreement; a real ambiguous image case would add evidence but is not required to establish the fail-closed invariant.
+5. URLs are HTTPS + hash-bound, but availability remains external. Unavailable sources intentionally fail closed rather than being treated as evidence.
+6. Injected-wallet state is external UI state. The frontend therefore re-verifies StudioNet after wallet prompts and clears its cached write client on `accountsChanged` or `chainChanged`.
 
