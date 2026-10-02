@@ -15,8 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Check diff formatting
-        run: git diff --check HEAD^ HEAD
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: git diff --check "$BASE_SHA" "$GITHUB_SHA"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
