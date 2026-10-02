@@ -33,6 +33,10 @@ jobs:
         env:
           GENVM_VERSION: v0.2.16
         run: genvm-lint check contracts/Bidframe.py
+      - name: GenVM typecheck
+        env:
+          GENVM_VERSION: v0.2.16
+        run: genvm-lint typecheck contracts/Bidframe.py
       - name: Direct Mode tests
         run: pytest tests/test_bidframe.py -v --tb=short
       - name: Submission source fingerprint
