@@ -104,13 +104,18 @@ describe('remediation UI', () => {
     expect(landlordView.view.textContent).not.toContain('Submit remediation evidence')
     act(() => root.unmount())
 
+    const disconnectedView = itemView(baseItem(), tenant, false)
+    const disconnectedSubmit = [...disconnectedView.view.querySelectorAll('button')].find(button => button.textContent === 'Submit remediation evidence')!
+    expect(disconnectedSubmit.disabled).toBe(true)
+    act(() => root.unmount())
+
     const ordinaryView = itemView(baseItem({ verdict: 'NORMAL_WEAR', cure_status: 'NOT_APPLICABLE', original_deduction_wei: 0n }), tenant)
     expect(ordinaryView.view.textContent).not.toContain('Submit remediation evidence')
     expect(ordinaryView.view.textContent).not.toContain('Assess remediation')
   })
 
   it('validates HTTPS URL and SHA-256 before enabling the immutable evidence write', () => {
-    const { view } = caseView(baseItem())
+    const { view, transact } = caseView(baseItem())
     const submit = [...view.querySelectorAll('button')].find(button => button.textContent === 'Submit remediation evidence')!
     expect(submit.disabled).toBe(true)
     const url = view.querySelector('input[placeholder="https://…"]') as HTMLInputElement
@@ -122,6 +127,8 @@ describe('remediation UI', () => {
     expect(submit.disabled).toBe(true)
     act(() => fillInput(url, 'https://evidence.test/repair.jpg'))
     expect(submit.disabled).toBe(false)
+    act(() => submit.click())
+    expect(transact).toHaveBeenCalledWith('Submit remediation evidence', 'submit_cure_evidence', [1n, 1n, 'https://evidence.test/repair.jpg', 'c'.repeat(64)], 0n, '1')
   })
 
   it('renders RESTORED audit result and applies deadline-aware permissionless actions', () => {
