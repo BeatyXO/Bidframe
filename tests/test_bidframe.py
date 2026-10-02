@@ -345,7 +345,7 @@ def test_total_deduction_is_capped_and_refund_is_deterministic(direct_vm, direct
 def configure_cure_assessment_mocks(direct_vm, before=BEFORE, damaged=AFTER, repaired=b"repaired-image", verdict="RESTORED"):
     direct_vm.clear_mocks()
     direct_vm.mock_web(r"evidence\.example/before\.jpg", {"status": 200, "body": before})
-    direct_vm.mock_web(r"evidence\.example/after-1\.jpg", {"status": 200, "body": damaged})
+    direct_vm.mock_web(r"evidence\.example/after-[0-9]+\.jpg", {"status": 200, "body": damaged})
     direct_vm.mock_web(r"evidence\.example/cure\.jpg", {"status": 200, "body": repaired})
     direct_vm.mock_llm(r"verify remediation", json.dumps({"verdict": verdict, "reasoning": "The observed defect is no longer visible."}))
 
@@ -384,6 +384,9 @@ def test_only_positive_new_damage_with_enabled_policy_is_cure_eligible(direct_vm
             assert item["cure_deadline"] == item["assessed_at"] + 3600
         else:
             assert item["cure_deadline"] == 0
+            with direct_vm.prank(direct_bob):
+                with direct_vm.expect_revert("only to an assessed NEW_DAMAGE"):
+                    contract.submit_cure_evidence(agreement_id, 1, "https://evidence.example/cure.jpg", HASH_A)
 
 
 def test_restored_cure_reduces_only_its_item_and_preserves_original_audit(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
@@ -496,6 +499,9 @@ def test_cure_submission_guards_hashes_role_immutability_and_deadline(direct_vm,
     with direct_vm.prank(direct_bob):
         with direct_vm.expect_revert("submission deadline has passed"):
             contract.submit_cure_evidence(later_id, 1, "https://evidence.example/cure.jpg", digest)
+        with direct_vm.expect_revert("waiver deadline has passed"):
+            contract.waive_cure(later_id, 1)
+    contract.expire_cure(later_id, 1)
 
 
 def test_cure_assessment_rejects_committed_hash_mismatch_without_state_change(direct_vm, direct_deploy, direct_alice, direct_bob):
@@ -536,7 +542,7 @@ def test_cure_consensus_ignores_reasoning_when_verdict_matches(direct_vm, direct
     assert direct_vm.run_validator() is True
 
 
-def test_waiver_releases_ready_and_capped_item_cure_isolated(direct_vm, direct_deploy, direct_alice, direct_bob):
+def test_waiver_releases_ready_and_deposit_cap_preserves_audit(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract = direct_deploy(CONTRACT)
     agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "NEW_DAMAGE", 3, count=2, deposit=GEN // 2, cure_window=3600)
     contract.assess_item(agreement_id, 1)
@@ -544,31 +550,53 @@ def test_waiver_releases_ready_and_capped_item_cure_isolated(direct_vm, direct_d
     before = contract.get_item(agreement_id, 1)
     capped = contract.get_item(agreement_id, 2)
     assert before["effective_deduction_wei"] == GEN // 2
-    assert capped["original_deduction_wei"] == GEN // 2
+    assert capped["assessed_deduction_wei"] == GEN // 2
+    assert capped["original_deduction_wei"] == 0
     assert capped["effective_deduction_wei"] == 0
+    assert capped["cure_status"] == "NOT_APPLICABLE"
     with direct_vm.prank(direct_alice):
         with direct_vm.expect_revert("Only the tenant"):
-            contract.waive_cure(agreement_id, 2)
+            contract.waive_cure(agreement_id, 1)
     direct_vm.sender = direct_bob
-    contract.waive_cure(agreement_id, 2)
+    contract.waive_cure(agreement_id, 1)
     with direct_vm.expect_revert("before evidence submission"):
-        contract.waive_cure(agreement_id, 2)
-    assert contract.get_item(agreement_id, 2)["cure_status"] == "WAIVED"
+        contract.waive_cure(agreement_id, 1)
+    assert contract.get_item(agreement_id, 1)["cure_status"] == "WAIVED"
+    assert contract.get_item(agreement_id, 2)["cure_status"] == "NOT_APPLICABLE"
     assert contract.get_item(agreement_id, 1)["effective_deduction_wei"] == GEN // 2
     assert contract.get_agreement(agreement_id)["raw_deduction_wei"] == GEN // 2
-    assert contract.get_agreement(agreement_id)["open_cure_count"] == 1
-
-    repaired = b"repair for capped item"
-    configure_cure_assessment_mocks(direct_vm, repaired=repaired)
-    digest = hashlib.sha256(repaired).hexdigest()
-    contract.submit_cure_evidence(agreement_id, 1, "https://evidence.example/cure.jpg", digest)
-    contract.assess_cure(agreement_id, 1)
-    assert contract.get_item(agreement_id, 1)["effective_deduction_wei"] == 0
-    assert contract.get_item(agreement_id, 2)["cure_status"] == "WAIVED"
-    assert contract.get_agreement(agreement_id)["raw_deduction_wei"] == 0
-    assert contract.get_agreement(agreement_id)["projected_refund_wei"] == GEN // 2
     assert contract.get_agreement(agreement_id)["open_cure_count"] == 0
     contract.mark_ready(agreement_id)
+
+
+def test_restored_and_not_restored_items_settle_only_effective_deductions(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract = direct_deploy(CONTRACT)
+    agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "NEW_DAMAGE", 3, count=2, deposit=2 * GEN, cure_window=3600)
+    contract.assess_item(agreement_id, 1)
+    contract.assess_item(agreement_id, 2)
+    repaired = b"restored item evidence"
+    for item_id, verdict in ((1, "RESTORED"), (2, "NOT_RESTORED")):
+        configure_cure_assessment_mocks(direct_vm, repaired=repaired, verdict=verdict)
+        direct_vm.sender = direct_bob
+        contract.submit_cure_evidence(agreement_id, item_id, "https://evidence.example/cure.jpg", hashlib.sha256(repaired).hexdigest())
+        contract.assess_cure(agreement_id, item_id)
+    first = contract.get_item(agreement_id, 1)
+    second = contract.get_item(agreement_id, 2)
+    assert first["original_deduction_wei"] == GEN // 2
+    assert first["effective_deduction_wei"] == 0
+    assert second["original_deduction_wei"] == GEN // 2
+    assert second["effective_deduction_wei"] == GEN // 2
+    direct_vm.sender = direct_alice
+    contract.mark_ready(agreement_id)
+    ready = contract.get_agreement(agreement_id)
+    assert ready["settlement_deduction_wei"] == GEN // 2
+    assert ready["projected_refund_wei"] == 3 * GEN // 2
+    contract.settle(agreement_id)
+    settled = contract.get_agreement(agreement_id)
+    assert settled["status"] == "SETTLED"
+    assert settled["settlement_deduction_wei"] + settled["projected_refund_wei"] == settled["deposit_wei"]
+    with direct_vm.expect_revert("finality"):
+        contract.assess_cure(agreement_id, 1)
 
 
 def test_ready_settle_and_double_settlement_rejection(direct_vm, direct_deploy, direct_alice, direct_bob):

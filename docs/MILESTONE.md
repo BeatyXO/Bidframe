@@ -11,11 +11,11 @@
 
 ## Before
 
-At the pre-milestone baseline, Bidframe supports frozen move-in evidence and item deduction caps, sealed move-out evidence with challenge/replacement handling, GenLayer semantic damage classification, deterministic deductions, conservative inconclusive recovery, and deterministic deposit settlement. Those capabilities are the accepted product baseline and are not claimed as new milestone work.
+At the pre-milestone repository baseline, Bidframe supports frozen move-in evidence and item deduction caps, sealed move-out evidence with challenge/replacement handling, GenLayer semantic damage classification, deterministic deductions, conservative inconclusive recovery, and deterministic deposit settlement. These are existing capabilities, not new milestone work. This statement does not establish which commit was accepted as the submission baseline.
 
 ## New in this milestone
 
-This milestone adds one bounded tenant remediation attempt after a successful `NEW_DAMAGE` assessment: a DRAFT-only cure policy frozen at funding, an assessment-based deadline, immutable hash-bound cure evidence, a GenLayer `RESTORED` / `NOT_RESTORED` / `INCONCLUSIVE` decision, preserved original adjudication alongside an effective deduction, and waiver/expiry liveness. If assessed item amounts exceed the deposit, their effective deductions are allocated in assessment order up to the remaining deposit; the original assessed amounts remain separately available for audit, and restoring one item releases only that item's allocated effective amount. It also adds reviewer reads, frontend controls, adversarial tests, CI coverage, and (after local implementation and hostile review) a fresh Studionet deployment and live proof.
+This milestone adds one bounded tenant remediation attempt after a successful `NEW_DAMAGE` assessment: a DRAFT-only cure policy frozen at funding, an assessment-based deadline, immutable hash-bound cure evidence, a GenLayer `RESTORED` / `NOT_RESTORED` / `INCONCLUSIVE` decision, preserved original adjudication alongside an effective deduction, and waiver/expiry liveness. If scheduled item amounts exceed the deposit, the original charged amount is allocated in assessment order up to the remaining deposit; the uncapped severity-mapped amount remains separately available for audit. Cure eligibility requires a positive original charged amount, and restoring an item releases only that item's amount. It also adds reviewer reads, frontend controls, adversarial tests, CI coverage, and (after local implementation and hostile review) a fresh Studionet deployment and live proof.
 
 ## Not milestone work
 
@@ -23,4 +23,4 @@ The existing agreement lifecycle, evidence challenge/replacement flow, original 
 
 ## Evidence status
 
-Deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.
+Local Direct Mode and frontend gates pass. Full SDK-based GenVM validation is blocked locally by an access-denied cached SDK artifact; CI validation is pending. The implementation-stage hostile review is recorded in `docs/MILESTONE_SECURITY_REVIEW.md`. Fresh deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.

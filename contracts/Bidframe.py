@@ -63,6 +63,7 @@ class Bidframe(gl.Contract):
     item_reasoning: TreeMap[str, str]
     item_inconclusive_resolved: TreeMap[str, bool]
     item_assessed_at: TreeMap[str, u64]
+    item_assessed_deduction_wei: TreeMap[str, u256]
     item_original_deduction_wei: TreeMap[str, u256]
     item_effective_deduction_wei: TreeMap[str, u256]
     cure_status: TreeMap[str, str]
@@ -432,17 +433,19 @@ Return JSON exactly with keys:
         self.item_assessed[key] = True
         self.item_verdict[key] = verdict
         self.item_severity[key] = u8(severity)
-        original_deduction = deduction
+        assessed_deduction = deduction
         current_total = int(self.total_deduction_wei[agreement_id])
         available = int(self.deposit_wei[agreement_id]) - current_total
         effective_deduction = deduction if int(deduction) <= available else u256(available)
+        original_deduction = effective_deduction
         self.item_deduction_wei[key] = effective_deduction
+        self.item_assessed_deduction_wei[key] = assessed_deduction
         self.item_original_deduction_wei[key] = original_deduction
         self.item_effective_deduction_wei[key] = effective_deduction
         self.item_reasoning[key] = str(result.get("reasoning", ""))[:500]
         assessed_at = u64(int(datetime.now(timezone.utc).timestamp()))
         self.item_assessed_at[key] = assessed_at
-        if verdict == "NEW_DAMAGE" and deduction > u256(0) and self.cure_window_seconds.get(agreement_id, u64(0)) > u64(0):
+        if verdict == "NEW_DAMAGE" and original_deduction > u256(0) and self.cure_window_seconds.get(agreement_id, u64(0)) > u64(0):
             window = self.cure_window_seconds[agreement_id]
             self.cure_status[key] = "ELIGIBLE"
             self.cure_deadline[key] = u64(int(assessed_at) + int(window))
@@ -495,6 +498,8 @@ Return JSON exactly with keys:
             raise gl.vm.UserError("Only the tenant may waive cure")
         if self.cure_status.get(key, "NOT_APPLICABLE") != "ELIGIBLE":
             raise gl.vm.UserError("Cure can only be waived before evidence submission")
+        if int(datetime.now(timezone.utc).timestamp()) >= int(self.cure_deadline[key]):
+            raise gl.vm.UserError("Cure waiver deadline has passed")
         self.cure_status[key] = "WAIVED"
         self.open_cure_count[agreement_id] = u32(int(self.open_cure_count[agreement_id]) - 1)
 
@@ -741,6 +746,7 @@ Return JSON with keys verdict and reasoning.
             "verdict": self.item_verdict.get(key, ""),
             "severity": int(self.item_severity.get(key, u8(0))),
             "deduction_wei": self.item_deduction_wei.get(key, u256(0)),
+            "assessed_deduction_wei": self.item_assessed_deduction_wei.get(key, u256(0)),
             "original_deduction_wei": self.item_original_deduction_wei.get(key, u256(0)),
             "effective_deduction_wei": self.item_effective_deduction_wei.get(key, u256(0)),
             "reasoning": self.item_reasoning.get(key, ""),

@@ -6,6 +6,10 @@ Bidframe is a single Intelligent Contract plus a reviewer-facing web application
 
 > Status: the liveness-safe revision is deployed to StudioNet 61999 at [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7), with verified source parity. The live frontend is https://bidframe-seven.vercel.app/. Live proof now covers both sides of the settlement design: Agreement #3 proves `UNCHANGED`, validator disagreement fail-closed behavior, challenge recovery, zero-deduction settlement and repeat-settlement rollback; Agreement #4 proves `NEW_DAMAGE` severity 3, the frozen 0.5 GEN severe deduction, READY → SETTLED, a 0.5 GEN landlord payment and 0.5 GEN tenant refund from an exact 1 GEN deposit. Exact proof is recorded in `docs/SUBMISSION.md` and `docs/studionet-new-damage-lifecycle.json`.
 
+## Remediation milestone
+
+This milestone extends Bidframe from one-shot damage settlement into remediation-aware deposit settlement: after a positive `NEW_DAMAGE` charge, the tenant can make one bounded, immutable repair-evidence submission, and GenLayer checks whether the damage was restored. Deterministic contract logic then removes or preserves that item's original charged amount. The DRAFT cure policy is frozen at funding, and waiver/expiry preserve settlement liveness. The milestone implementation is in progress; the historical deployment and live frontend above predate this capability and are not remediation proof. See [`docs/MILESTONE.md`](docs/MILESTONE.md).
+
 ## Why GenLayer
 
 A normal smart contract can enforce deadlines and arithmetic but cannot reliably decide whether a wall has ordinary scuffing, a worktop has new damage, or an item is missing by comparing photographs. Bidframe puts only that semantic/visual question through consensus. Everything economically sensitive remains deterministic.
