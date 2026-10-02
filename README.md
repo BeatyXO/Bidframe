@@ -10,6 +10,8 @@ Bidframe is a single Intelligent Contract plus a reviewer-facing web application
 
 This milestone extends Bidframe from one-shot damage settlement into remediation-aware deposit settlement: after a positive `NEW_DAMAGE` charge, the tenant can make one bounded, immutable repair-evidence submission, and GenLayer checks whether the damage was restored. Deterministic contract logic then removes or preserves that item's original charged amount. The DRAFT cure policy is frozen at funding, and waiver/expiry preserve settlement liveness. The milestone implementation is in progress; the historical deployment and live frontend above predate this capability and are not remediation proof. See [`docs/MILESTONE.md`](docs/MILESTONE.md).
 
+> Remediation status: implementation, hostile review, CI, fresh StudioNet deployment/source parity, and the synthetic mixed-verdict live settlement are recorded in [`docs/MILESTONE_LIVE_VERIFICATION.md`](docs/MILESTONE_LIVE_VERIFICATION.md). Vercel production update and manual browser verification remain pending because the currently available Vercel account cannot access the Bidframe production project. The existing deployment above predates the cure workflow and is not proof of it.
+
 ## Why GenLayer
 
 A normal smart contract can enforce deadlines and arithmetic but cannot reliably decide whether a wall has ordinary scuffing, a worktop has new damage, or an item is missing by comparing photographs. Bidframe puts only that semantic/visual question through consensus. Everything economically sensitive remains deterministic.

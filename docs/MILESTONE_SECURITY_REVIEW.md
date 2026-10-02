@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This hostile review covers the Remediation / Cure Verification source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. The corrected source uses a two-image cure prompt and has passed local contract, frontend, and build gates. Hosted CI, a replacement fresh deployment, and live verification of the two-image path remain required before this review is final.
+This hostile review covers the Remediation / Cure Verification source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. The corrected source uses a two-image cure prompt and has passed local contract, frontend, build, and hosted CI gates. A fresh StudioNet deployment passed exact source parity, and Agreement #2 completed a mixed-verdict live synthetic cure and settlement. Vercel production update and manual browser verification remain outstanding due to project access.
 
 ## Findings addressed
 
@@ -15,17 +15,18 @@ This hostile review covers the Remediation / Cure Verification source diff from 
 - **Storage and loops:** Cure evidence and results are held in fixed per-item maps; new cure paths do not introduce unbounded iteration or append-only arrays.
 - **Frontend stale receipt state:** Submitted transactions remain pending until finalized; the existing transaction classifier is now unit-tested for pending, successful, and failed finalized receipts. Successful cure actions refresh the loaded agreement state.
 
-## Current local gates
+## Verification gates
 
 - Direct Mode: `python -m pytest tests/test_bidframe.py -v --tb=short` — 30 passed, including a regression check that the cure prompt stays within the two-image runtime limit.
 - GenVM: `GENVM_VERSION=v0.2.16 genvm-lint check contracts/Bidframe.py` — 3 lint checks, SDK validation, and 21-method schema passed; `genvm-lint typecheck` reports no errors.
 - Frontend: `npm test -- --configLoader runner` — 7 passed; typecheck and production build pass. Build reports the existing >500 kB JavaScript chunk warning.
-- Prior hosted run [37034287542](https://github.com/BeatyXO/Bidframe/actions/runs/37034287542) passed both jobs before the two-image correction. CI for the corrected source remains pending.
+- Hosted CI runs [37039784248](https://github.com/BeatyXO/Bidframe/actions/runs/37039784248), [37042627827](https://github.com/BeatyXO/Bidframe/actions/runs/37042627827), and [37043061036](https://github.com/BeatyXO/Bidframe/actions/runs/37043061036) completed successfully after the two-image correction and isolated-fixture/proof-guard changes.
 
 ## Runtime investigation and remaining review gates
 
 - GenLayer's official [validator configuration](https://docs.genlayer.com/validators/genvm-configuration) documents text plus up to two images. The [image processing guide](https://docs.genlayer.com/developers/intelligent-contracts/features/image-processing) accepts a sequence of image bytes.
-- First deployment excluded from proof: contract `0xd5F5E42D46AFa23903dd479e19667029f77247e4`, deployment transaction `0xe19111080a5c325c954708d312afb41ab47dc72f4001c723b6b322ce627b6b2a`. Cure transaction `0x219c96ae0c759da5cc9f955e90a869c0a8ff2e482854e5ef212eb806675d0862` finalized `MAJORITY_DISAGREE`; its leader trace returned `SystemError: 2: inval` at the three-image `exec_prompt` call. An earlier `mark_ready` negative guard transaction `0x27aa4d694cbc089c788bb855ee0280803adeeec8b5ecda04868407c8d3fec0be` correctly finalized as `ERROR / rollback` while cures were open. Agreement #1's exact 1 GEN deposit is being recovered through the frozen deadline and permissionless expiry; it is not milestone proof.
-- Re-run hosted CI after the two-image correction.
-- Deploy a replacement fresh contract, verify deployed source parity, and complete the lifecycle against that new contract only.
-- The historical contract and Vercel frontend are pre-milestone and are not evidence for this capability.
+- The first deployment excluded from proof is `0xd5F5E42D46AFa23903dd479e19667029f77247e4`, deployment transaction `0xe19111080a5c325c954708d312afb41ab47dc72f4001c723b6b322ce627b6b2a`. Cure transaction `0x219c96ae0c759da5cc9f955e90a869c0a8ff2e482854e5ef212eb806675d0862` finalized `MAJORITY_DISAGREE`; its leader trace returned `SystemError: 2: inval` at the three-image `exec_prompt` call. An earlier `mark_ready` guard `0x27aa4d694cbc089c788bb855ee0280803adeeec8b5ecda04868407c8d3fec0be` correctly finalized as `ERROR / rollback` while cures were open.
+- The replacement deployment is `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`, deployment transaction `0xd4aab6db115072fcd1139496fc41ac373ccc61f91aeedffd5f0d7a2128d472c5`. Local and remote normalized source hashes match exactly at `f72296e6d5454248fb86ae0363c468bf12ef0df4a8996401b5059f13b58e135a`.
+- Agreement #2 on that deployment used isolated, hash-pinned synthetic bay crops. GenLayer finalized `RESTORED` for item 1 and `NOT_RESTORED` for item 2. The attempted early READY rolled back while both cures were open. After cure assessment, READY and settlement succeeded; only the second item's 0.125 GEN effective deduction was paid, 0.875 GEN was refunded, and contract balance was zero. Exact transaction evidence is in `docs/MILESTONE_LIVE_VERIFICATION.md`.
+- The full-scene diagnostic lifecycle on the corrected deployment returned `NOT_RESTORED` for both items because the restored left-bay image still contained the separate right-bay crack. It was settled and excluded from proof. The original three-image diagnostic deployment's Agreement #1 now has both cure windows expired but remains `ASSESSING` with its 1 GEN test deposit: party-only READY/settle attempts rolled back because the generated test parties' private keys were not retained. This is a test-process recovery limitation, not evidence for or against the final Agreement #2; the address and state are recorded transparently and excluded.
+- Remaining release gates: authorize the correct Vercel project account, update its production `VITE_CONTRACT_ADDRESS`, then manually verify the production frontend in a browser. The available Vercel CLI identity `ifem1` sees only the `ifem1s-projects` team, which has no Bidframe project; the browser GitHub sign-in reached Vercel's 2FA prompt. The historical contract and Vercel frontend remain pre-milestone and are not evidence for this capability.
