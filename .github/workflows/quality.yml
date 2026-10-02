@@ -46,6 +46,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck
+      - name: Frontend tests
+        run: npm test
       - name: Production build
         env:
           VITE_CONTRACT_ADDRESS: '0x3f5F81618cc86604f7094E525F46f37363CD99a7'

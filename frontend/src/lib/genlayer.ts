@@ -11,7 +11,7 @@ export const readClient = createClient({ chain: studionet })
 export type WalletClient = ReturnType<typeof createClient>
 
 type ProviderErrorInfo = { code?: number; message?: string }
-type StudioTransaction = {
+export type StudioTransaction = {
   statusName?: string
   status?: number
   result_name?: string
@@ -217,25 +217,7 @@ export async function submitContract(client: WalletClient, functionName: string,
 export async function inspectTransaction(hash: string): Promise<TransactionOutcome> {
   try {
     const tx = await readClient.getTransaction({ hash: hash as `0x${string}` & { length: 66 } }) as unknown as StudioTransaction
-    const finalized = tx.statusName === 'FINALIZED' || tx.status === 7
-    if (!finalized) {
-      return { state: 'pending', message: `StudioNet status: ${tx.statusName ?? tx.status ?? 'pending'}.`, transaction: tx }
-    }
-
-    const leader = tx.consensus_data?.leader_receipt?.find(row => row.mode === 'leader') ?? tx.consensus_data?.leader_receipt?.[0]
-    const resultStatus = leader?.result && typeof leader.result === 'object'
-      ? (leader.result as { status?: string }).status
-      : undefined
-    const success = tx.result_name === 'MAJORITY_AGREE'
-      && leader?.execution_result === 'SUCCESS'
-      && (resultStatus === undefined || resultStatus === 'return')
-
-    if (success) {
-      return { state: 'success', message: 'FINALIZED / MAJORITY_AGREE / SUCCESS', transaction: tx }
-    }
-
-    const detail = `FINALIZED / ${tx.result_name ?? 'unknown consensus'} / ${leader?.execution_result ?? 'unknown execution'}${resultStatus ? ` / ${resultStatus}` : ''}`
-    return { state: 'failed', message: detail, transaction: tx }
+    return classifyStudioTransaction(tx)
   } catch (error) {
     // A submitted hash can be temporarily unavailable while StudioNet indexes or
     // rate-limits reads. That is not a terminal transaction failure.
@@ -244,6 +226,21 @@ export async function inspectTransaction(hash: string): Promise<TransactionOutco
       message: `StudioNet status is temporarily unavailable; continuing to reconcile. ${error instanceof Error ? error.message : ''}`.trim(),
     }
   }
+}
+
+export function classifyStudioTransaction(tx: StudioTransaction): TransactionOutcome {
+  const finalized = tx.statusName === 'FINALIZED' || tx.status === 7
+  if (!finalized) return { state: 'pending', message: `StudioNet status: ${tx.statusName ?? tx.status ?? 'pending'}.`, transaction: tx }
+  const leader = tx.consensus_data?.leader_receipt?.find(row => row.mode === 'leader') ?? tx.consensus_data?.leader_receipt?.[0]
+  const resultStatus = leader?.result && typeof leader.result === 'object'
+    ? (leader.result as { status?: string }).status
+    : undefined
+  const success = tx.result_name === 'MAJORITY_AGREE'
+    && leader?.execution_result === 'SUCCESS'
+    && (resultStatus === undefined || resultStatus === 'return')
+  if (success) return { state: 'success', message: 'FINALIZED / MAJORITY_AGREE / SUCCESS', transaction: tx }
+  const detail = `FINALIZED / ${tx.result_name ?? 'unknown consensus'} / ${leader?.execution_result ?? 'unknown execution'}${resultStatus ? ` / ${resultStatus}` : ''}`
+  return { state: 'failed', message: detail, transaction: tx }
 }
 
 export async function assertSuccessfulFinalizedTransaction(hash: string, _receipt?: unknown) {

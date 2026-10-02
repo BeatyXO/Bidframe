@@ -301,6 +301,17 @@ footer p { margin: 0; }
 .activity-row span { color: #8b7f94; font-size: 8px; line-height: 1.5; }
 .activity-row-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
 .activity-row-actions a { display: inline-flex; align-items: center; gap: 3px; color: var(--purple-700); font: 8px 'DM Mono', monospace; font-weight: 700; }
+.cure-policy-card { margin: 18px 0; }
+.policy-control { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.policy-control label { display: grid; gap: 6px; min-width: 190px; color: var(--ink-700); font-size: 11px; font-weight: 650; }
+.policy-control select, .policy-control input { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; color: var(--ink-900); background: white; font: inherit; }
+.cure-detail { display: grid; gap: 10px; margin: 14px 0; padding: 14px; border: 1px solid #e1d3f0; border-radius: 12px; background: #fbf8ff; }
+.cure-audit { display: grid; grid-template-columns: minmax(130px, .8fr) 1.4fr; gap: 8px 12px; font-size: 11px; }
+.cure-audit b { color: var(--purple-800); }
+.cure-audit span { color: var(--ink-800); }
+.cure-deadline { margin: 0; color: var(--ink-600); font-size: 10px; }
+.cure-controls { margin-top: 2px; }
+.cure-detail > code { overflow-wrap: anywhere; color: var(--purple-800); font: 9px 'DM Mono', monospace; }
 
 @media (max-width: 700px) {
   .wallet-menu { position: fixed; right: 14px; top: 76px; }
@@ -308,4 +319,7 @@ footer p { margin: 0; }
   .case-title-actions .case-load { flex: 1; }
   .activity-row { align-items: flex-start; flex-direction: column; }
   .activity-row-actions { width: 100%; justify-content: space-between; }
+  .policy-control { align-items: stretch; flex-direction: column; }
+  .policy-control label { min-width: 0; }
+  .cure-audit { grid-template-columns: 1fr; gap: 4px; }
 }
