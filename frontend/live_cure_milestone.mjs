@@ -345,6 +345,11 @@ const itemsBeforeReady = await Promise.all([1, 2].map(id => readItem(agreementId
 const agreementBeforeReady = await readAgreement(agreementId)
 record('pre_ready_readback', { agreement: agreementBeforeReady, items: itemsBeforeReady })
 if (agreementBeforeReady.open_cure_count !== 0) throw new Error('Cure opportunities remain active after cure assessments.')
+const expectedCureVerdicts = ['RESTORED', 'NOT_RESTORED']
+const observedCureVerdicts = itemsBeforeReady.map(item => item.cure_verdict)
+if (observedCureVerdicts.some((verdict, index) => verdict !== expectedCureVerdicts[index])) {
+  throw new Error(`Synthetic cure fixtures did not produce the expected mixed verdicts: ${observedCureVerdicts.join(', ')}.`)
+}
 
 const ready = await write('mark agreement READY', landlordClient, 'mark_ready', [BigInt(agreementId)])
 const readyAgreement = await readAgreement(agreementId)
