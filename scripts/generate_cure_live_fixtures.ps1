@@ -50,3 +50,22 @@ Draw-Wall (Join-Path $target 'move-in-baseline.png') $false $false
 Draw-Wall (Join-Path $target 'move-out-damaged.png') $true $true
 Draw-Wall (Join-Path $target 'cure-item-a-restored.png') $false $true
 Draw-Wall (Join-Path $target 'cure-item-b-not-restored.png') $true $true
+
+function Save-BayCrop([string]$SourcePath, [string]$DestinationPath, [int]$X) {
+    $source = [System.Drawing.Bitmap]::new($SourcePath)
+    $rectangle = [System.Drawing.Rectangle]::new($X, 0, 600, 800)
+    $crop = $source.Clone($rectangle, $source.PixelFormat)
+    $crop.Save($DestinationPath, [System.Drawing.Imaging.ImageFormat]::Png)
+    $crop.Dispose(); $source.Dispose()
+}
+
+$baseline = Join-Path $target 'move-in-baseline.png'
+$damaged = Join-Path $target 'move-out-damaged.png'
+$restoredLeft = Join-Path $target 'cure-item-a-restored.png'
+$notRestoredRight = Join-Path $target 'cure-item-b-not-restored.png'
+Save-BayCrop $baseline (Join-Path $target 'item-a-move-in-baseline.png') 0
+Save-BayCrop $damaged (Join-Path $target 'item-a-move-out-damaged.png') 0
+Save-BayCrop $restoredLeft (Join-Path $target 'item-a-cure-restored.png') 0
+Save-BayCrop $baseline (Join-Path $target 'item-b-move-in-baseline.png') 600
+Save-BayCrop $damaged (Join-Path $target 'item-b-move-out-damaged.png') 600
+Save-BayCrop $notRestoredRight (Join-Path $target 'item-b-cure-not-restored.png') 600

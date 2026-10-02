@@ -199,16 +199,20 @@ async function closeSafely(id) {
 
 const fixture = name => `https://raw.githubusercontent.com/BeatyXO/Bidframe/${fixtureCommit}/docs/fixtures/cure-live/${name}`
 const urls = {
-  baseline: fixture('move-in-baseline.png'),
-  damaged: fixture('move-out-damaged.png'),
-  restoredA: fixture('cure-item-a-restored.png'),
-  notRestoredB: fixture('cure-item-b-not-restored.png'),
+  baselineA: fixture('item-a-move-in-baseline.png'),
+  damagedA: fixture('item-a-move-out-damaged.png'),
+  restoredA: fixture('item-a-cure-restored.png'),
+  baselineB: fixture('item-b-move-in-baseline.png'),
+  damagedB: fixture('item-b-move-out-damaged.png'),
+  notRestoredB: fixture('item-b-cure-not-restored.png'),
 }
 const hashes = {
-  baseline: 'df1c354785e35e44e54c2bd4a694c1041e94c617ea4ba402cc7509a98cf11ef1',
-  damaged: 'f93f029592989cf8deb7f40d1c66d01b59388f9cb1e4dd7543a9bd8889fe96a1',
-  restoredA: '59ab7195f04db54e071afbef14dbda47024d64d2afa848b742c8680eb9a2ff98',
-  notRestoredB: 'f93f029592989cf8deb7f40d1c66d01b59388f9cb1e4dd7543a9bd8889fe96a1',
+  baselineA: '6be8e80deb43ceea18c5889c5d32b69cd133066743cafee1443282906b05015d',
+  damagedA: 'a8c0b7c0f232cef30aac9a426f8dacc1f6ec7cc14fd3e2996b434d4671cc073d',
+  restoredA: '6be8e80deb43ceea18c5889c5d32b69cd133066743cafee1443282906b05015d',
+  baselineB: '47449d9fed8d0cf1a07dd91032d2613913906b9d2f6558d7aca3ec8d735b50fe',
+  damagedB: '97f46a802581affa984301f88746bdd33e50ca6d30ef4c69db8efa7a2b0da9a1',
+  notRestoredB: '97f46a802581affa984301f88746bdd33e50ca6d30ef4c69db8efa7a2b0da9a1',
 }
 
 const chainId = await publicClient.getChainId()
@@ -261,14 +265,15 @@ const policy = await write('configure DRAFT cure policy', landlordClient, 'confi
 record('policy_readback', { transaction: policy.hash, agreement: await readAgreement(agreementId) })
 
 const itemDescriptions = [
-  { label: 'Synthetic left wall bay crack', description: 'Synthetic protocol fixture only, not real tenancy evidence. Assess the distinct LEFT wall bay: move-out shows a new prominent jagged crack that was absent in the move-in baseline. Ignore the right bay.' },
-  { label: 'Synthetic right wall bay crack', description: 'Synthetic protocol fixture only, not real tenancy evidence. Assess the distinct RIGHT wall bay: move-out shows a new prominent jagged crack that was absent in the move-in baseline. Ignore the left bay.' },
+  { label: 'Synthetic left wall bay crack', description: 'Synthetic protocol fixture only, not real tenancy evidence. Assess the isolated LEFT wall bay shown in these cropped images: move-out shows a new prominent jagged crack absent from the move-in baseline.' },
+  { label: 'Synthetic right wall bay crack', description: 'Synthetic protocol fixture only, not real tenancy evidence. Assess the isolated RIGHT wall bay shown in these cropped images: move-out shows a new prominent jagged crack absent from the move-in baseline.' },
 ]
 for (let index = 0; index < itemDescriptions.length; index++) {
   const item = itemDescriptions[index]
+  const bay = index === 0 ? 'A' : 'B'
   const tx = await write(`register synthetic damage item ${index + 1}`, landlordClient, 'add_item', [
     BigInt(agreementId), item.label, item.description,
-    urls.baseline, hashes.baseline,
+    urls[`baseline${bay}`], hashes[`baseline${bay}`],
     gen / 20n, gen / 8n, gen / 4n, gen / 4n,
   ])
   record('item_registered_readback', { itemId: index + 1, transaction: tx.hash, item: await readItem(agreementId, index + 1) })
@@ -294,7 +299,8 @@ if (fundedAgreement.status !== 'ACTIVE' || contractAfterFunding - contractBefore
 
 await write('open checkout', landlordClient, 'open_checkout', [BigInt(agreementId)])
 for (let itemId = 1; itemId <= 2; itemId++) {
-  const tx = await write(`tenant submits damaged checkout evidence for item ${itemId}`, tenantClient, 'submit_checkout_evidence', [BigInt(agreementId), BigInt(itemId), urls.damaged, hashes.damaged])
+  const bay = itemId === 1 ? 'A' : 'B'
+  const tx = await write(`tenant submits damaged checkout evidence for item ${itemId}`, tenantClient, 'submit_checkout_evidence', [BigInt(agreementId), BigInt(itemId), urls[`damaged${bay}`], hashes[`damaged${bay}`]])
   record('checkout_evidence_readback', { itemId, transaction: tx.hash, item: await readItem(agreementId, itemId) })
 }
 
