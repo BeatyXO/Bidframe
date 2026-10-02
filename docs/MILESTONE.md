@@ -23,4 +23,4 @@ The existing agreement lifecycle, evidence challenge/replacement flow, original 
 
 ## Evidence status
 
-Local Direct Mode, frontend gates, GenVM SDK validation, and schema extraction pass with the contract-compatible `v0.2.16` runtime. Hosted CI validation is pending because the current GitHub credentials cannot push to `origin/main`. The implementation-stage hostile review is recorded in `docs/MILESTONE_SECURITY_REVIEW.md`. Fresh deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.
+Local Direct Mode, frontend gates, GenVM SDK validation, and schema extraction pass with the contract-compatible `v0.2.16` runtime. GitHub Actions run [37034287542](https://github.com/BeatyXO/Bidframe/actions/runs/37034287542) passed both contract and frontend jobs. The hostile review is recorded in `docs/MILESTONE_SECURITY_REVIEW.md`. Fresh deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.

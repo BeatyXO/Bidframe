@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This is the implementation-stage hostile review for the Remediation / Cure Verification milestone. The review is being run against the source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. Deployment is not approved by this document. A green hosted CI run and fresh-chain verification remain deployment gates.
+This hostile review covers the Remediation / Cure Verification source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. Contract, frontend, and CI gates have passed. Fresh-chain verification remains a deployment gate.
 
 ## Findings addressed
 
@@ -22,10 +22,10 @@ This is the implementation-stage hostile review for the Remediation / Cure Verif
 - GenVM full check with the contract-compatible runtime selected explicitly: `GENVM_VERSION=v0.2.16 genvm-lint check contracts/Bidframe.py` — 3 AST checks and SDK validation pass; schema exposes 21 methods (3 views, 18 writes).
 - GenVM SDK typecheck: `GENVM_VERSION=v0.2.16 genvm-lint typecheck contracts/Bidframe.py` — no type errors.
 - Frontend tests: `npm test` — 7 passed; typecheck and production build pass locally. The production build reports the existing large JavaScript chunk warning.
+- Hosted CI: [GitHub Actions run 37034287542](https://github.com/BeatyXO/Bidframe/actions/runs/37034287542) — both `contract` and `frontend` jobs passed. Contract job reports 29 Direct Mode tests, 3 GenVM lint checks, SDK validation, typecheck, and source fingerprint; frontend job reports dependency install, typecheck, 7 UI tests, and production build.
 
 ## Remaining review gates
 
-- Obtain a green GitHub Actions run with CI pinned to the contract-compatible GenVM runtime.
 - Recheck source after any validation-driven change.
 - Before deployment, verify a fresh contract, deployed source parity, and the complete lifecycle against the new contract only.
 - The historical contract and Vercel frontend are pre-milestone and are not evidence for this capability.
