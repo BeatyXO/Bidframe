@@ -20,7 +20,7 @@ This hostile review covers the Remediation / Cure Verification source diff from 
 - Direct Mode: `python -m pytest tests/test_bidframe.py -v --tb=short` — 30 passed, including a regression check that the cure prompt stays within the two-image runtime limit.
 - GenVM: `GENVM_VERSION=v0.2.16 genvm-lint check contracts/Bidframe.py` — 3 lint checks, SDK validation, and 21-method schema passed; `genvm-lint typecheck` reports no errors.
 - Frontend: `npm test -- --configLoader runner` — 7 passed; typecheck and production build pass. Build reports the existing >500 kB JavaScript chunk warning.
-- Hosted CI runs [37039784248](https://github.com/BeatyXO/Bidframe/actions/runs/37039784248), [37042627827](https://github.com/BeatyXO/Bidframe/actions/runs/37042627827), and [37043061036](https://github.com/BeatyXO/Bidframe/actions/runs/37043061036) completed successfully after the two-image correction and isolated-fixture/proof-guard changes.
+- Hosted CI runs [37039784248](https://github.com/BeatyXO/Bidframe/actions/runs/37039784248), [37042627827](https://github.com/BeatyXO/Bidframe/actions/runs/37042627827), and [37043061036](https://github.com/BeatyXO/Bidframe/actions/runs/37043061036) completed successfully after the two-image correction and isolated-fixture/proof-guard changes. Release-config run [37054492664](https://github.com/BeatyXO/Bidframe/actions/runs/37054492664) also passed, including the workflow production build configured for the milestone contract address.
 
 ## Runtime investigation and remaining review gates
 
