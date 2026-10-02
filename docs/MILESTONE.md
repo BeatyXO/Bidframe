@@ -23,4 +23,4 @@ The existing agreement lifecycle, evidence challenge/replacement flow, original 
 
 ## Evidence status
 
-Local Direct Mode and frontend gates pass. Full SDK-based GenVM validation is blocked locally by an access-denied cached SDK artifact; CI validation is pending. The implementation-stage hostile review is recorded in `docs/MILESTONE_SECURITY_REVIEW.md`. Fresh deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.
+Local Direct Mode, frontend gates, GenVM SDK validation, and schema extraction pass with the contract-compatible `v0.2.16` runtime. Hosted CI validation is pending because the current GitHub credentials cannot push to `origin/main`. The implementation-stage hostile review is recorded in `docs/MILESTONE_SECURITY_REVIEW.md`. Fresh deployment, source parity, live remediation lifecycle, frontend production update, and manual browser verification are pending. No existing deployment or transaction is milestone proof.

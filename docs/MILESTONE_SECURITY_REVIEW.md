@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This is the implementation-stage hostile review for the Remediation / Cure Verification milestone. The review is being run against the source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. Deployment is not approved by this document. Final CI, clean SDK-based GenVM validation, and fresh-chain verification remain deployment gates.
+This is the implementation-stage hostile review for the Remediation / Cure Verification milestone. The review is being run against the source diff from pre-milestone repository baseline `7d9b30268d0607b2e012d0be528d21c01101fdf7`. Deployment is not approved by this document. A green hosted CI run and fresh-chain verification remain deployment gates.
 
 ## Findings addressed
 
@@ -19,12 +19,12 @@ This is the implementation-stage hostile review for the Remediation / Cure Verif
 
 - Direct Mode: `python -m pytest tests/test_bidframe.py -v --tb=short` — 28 passed.
 - Fast GenVM AST checks: `genvm-lint lint contracts/Bidframe.py` — 3 checks passed.
-- GenVM full check: AST lint passes, but SDK validation could not load the cached `genlayerlabs-genvm-manager-v0.6.0-rc5` artifact on this Windows host (`WinError 5`, access denied). This is an environment/tool-cache limitation; a clean SDK validation and CI run remain pending before deployment.
-- Frontend tests, typecheck, and production build pass locally; exact results are tracked in the milestone handoff.
+- GenVM full check with the contract-compatible runtime selected explicitly: `GENVM_VERSION=v0.2.16 genvm-lint check contracts/Bidframe.py` — 3 AST checks and SDK validation pass; schema exposes 21 methods (3 views, 18 writes).
+- Frontend tests: `npm test` — 7 passed; typecheck and production build pass locally. The production build reports the existing large JavaScript chunk warning.
 
 ## Remaining review gates
 
-- Confirm GenVM SDK schema/semantic validation on a clean supported environment and obtain a green GitHub Actions run.
+- Obtain a green GitHub Actions run with CI pinned to the contract-compatible GenVM runtime.
 - Recheck source after any validation-driven change.
 - Before deployment, verify a fresh contract, deployed source parity, and the complete lifecycle against the new contract only.
 - The historical contract and Vercel frontend are pre-milestone and are not evidence for this capability.
