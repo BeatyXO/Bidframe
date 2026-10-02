@@ -6,7 +6,7 @@
 - Pre-milestone repository baseline: `7d9b30268d0607b2e012d0be528d21c01101fdf7`.
 - Substantive final submission-pass HEAD recorded in repository evidence: `af1225288e7c0b372d07c04633c62e4cb6e149c5`.
 - `4d4e9bcb4312f1230dc478dbefe9bca07bddce32` and `7d9b30268d0607b2e012d0be528d21c01101fdf7` are documentation-only follow-ups after that submission-pass HEAD and remain in history.
-- Milestone head: **IN PROGRESS**; production Vercel update and manual browser verification remain outstanding.
+- Milestone head: **IN PROGRESS**; the owner-reported Vercel redeployment and read-only Agreement #2 rendering have been verified, while injected-wallet/network/write receipt checks remain outstanding.
 - Compare URL: `https://github.com/BeatyXO/Bidframe/compare/<ACCEPTED_BASELINE_SHA>...<FINAL_MILESTONE_SHA>` (accepted baseline pending confirmation).
 
 ## Before
@@ -27,4 +27,4 @@ The two-image cure prompt passes 30 Direct Mode tests, GenVM lint/SDK validation
 
 Corrected source was freshly deployed to StudioNet 61999 at `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`; deployed source parity is exact. Agreement #2 produced the expected mixed `RESTORED` / `NOT_RESTORED` cure decisions and settled 1 GEN with a 0.125 GEN landlord payment, 0.875 GEN tenant refund, and zero contract balance. Its transaction-level proof is recorded in `docs/MILESTONE_LIVE_VERIFICATION.md`. The first deployment and initial full-scene fixture run are explicitly excluded; the diagnostic first deployment's test agreement remains unsettled with its synthetic deposit, as documented.
 
-The Vercel production update and manual browser verification remain pending because the available CLI account does not have access to the Bidframe Vercel project. No pre-milestone deployment or frontend counts as cure workflow proof. The accepted submission baseline remains **PENDING CONFIRMATION**; `7d9b...` is only the pre-milestone repository baseline.
+The owner reports that Vercel was redeployed with the milestone contract. On 2026-10-02, read-only browser checks at `https://bidframe-seven.vercel.app/` confirmed the contract link is `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`, StudioNet chain ID 61999 is displayed, and Agreement #2 renders the frozen cure policy, `RESTORED` / `NOT_RESTORED`, original versus effective deductions, and settlement amounts matching the live proof. Wallet/network switching and a safe write/receipt check remain unverified because no injected EIP-1193 wallet is available in the browser environment; the already-settled proof agreement was not used for a write. Therefore the milestone remains **IN PROGRESS**, and this is not the final documentation freeze. No pre-milestone deployment or frontend counts as cure workflow proof. The accepted submission baseline remains **PENDING CONFIRMATION**; `7d9b...` is only the pre-milestone repository baseline.

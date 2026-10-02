@@ -6,9 +6,10 @@ Bidframe's submission evidence is complete for both negative/recovery and positi
 - Network: GenLayer StudioNet only, chain ID `61999 / 0xF22F`
 - RPC: `https://studio.genlayer.com/api`
 - Explorer: `https://explorer-studio.genlayer.com`
-- Canonical contract: `0x3f5F81618cc86604f7094E525F46f37363CD99a7`
-- Canonical deployment tx: `0x3b63ca8a9d71f1174422c1b0b42737b4d1ca232206eabc50f97c42eb4f34ebc3`
-- Contract source SHA-256: `3bd0f351abe27649776d9e804616ea4215bcdba1ae2005e72d636d586b1dffa3`
+- Current remediation milestone contract: `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`
+- Remediation deployment tx: `0xd4aab6db115072fcd1139496fc41ac373ccc61f91aeedffd5f0d7a2128d472c5`
+- Remediation source parity SHA-256 (LF-normalized): `f72296e6d5454248fb86ae0363c468bf12ef0df4a8996401b5059f13b58e135a`
+- Historical submission contract and Agreements #3/#4: `docs/SUBMISSION.md` and `docs/studionet-new-damage-lifecycle.json`
 - Live frontend: `https://bidframe-seven.vercel.app/`
 - Architecture: exactly one Python Intelligent Contract, `contracts/Bidframe.py`
 
@@ -52,7 +53,7 @@ An earlier invalid pre-inventory 1 GEN funding attempt (`0xa48161b06f505bf8b3964
 Before future merges, keep these green:
 
 - `genvm-lint check contracts/Bidframe.py`
-- all 19 Direct Mode tests
+- all 30 Direct Mode tests
 - `python scripts/verify_submission.py`
 - `npm ci`
 - `npm run typecheck`

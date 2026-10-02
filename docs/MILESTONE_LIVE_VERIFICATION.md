@@ -52,4 +52,14 @@ Finalized transaction IDs:
 
 ## Remaining release steps
 
-Contract, frontend, adversarial tests, hostile review, hosted CI, fresh deployment, source parity, and the synthetic live mixed-verdict lifecycle are complete. Vercel production update and manual browser verification remain pending: the available Vercel CLI/browser login is not yet authorized for the Bidframe production project.
+Contract, frontend, adversarial tests, hostile review, hosted CI, fresh deployment, source parity, and the synthetic live mixed-verdict lifecycle are complete.
+
+## Production frontend read-only verification
+
+On 2026-10-02, the owner reported redeploying `https://bidframe-seven.vercel.app/` with the milestone contract. Read-only browser checks confirmed:
+
+- StudioNet chain ID `61999` is displayed.
+- Contract links target `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`.
+- Loading Agreement #2 renders the 0.25-hour frozen cure policy, original 0.125 GEN deductions for both items, `RESTORED` / 0 GEN effective deduction for item 1, `NOT_RESTORED` / 0.125 GEN effective deduction for item 2, and the 1 GEN deposit / 0.125 GEN deduction / 0.875 GEN refund settlement.
+
+Wallet-dependent manual checks remain pending. The available in-app browser reported `No injected EIP-1193 wallet found`; no available browser exposed a connected wallet. Network switching, an injected-wallet write, and post-write receipt handling could not be exercised. Agreement #2 is already settled, so no write was attempted against it and the canonical lifecycle was not rerun. The Vercel settings were not changed by the agent.
