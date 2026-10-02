@@ -389,6 +389,18 @@ def test_only_positive_new_damage_with_enabled_policy_is_cure_eligible(direct_vm
                     contract.submit_cure_evidence(agreement_id, 1, "https://evidence.example/cure.jpg", HASH_A)
 
 
+def test_disabled_cure_policy_preserves_new_damage_deduction_without_blocking_ready(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract = direct_deploy(CONTRACT)
+    agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "NEW_DAMAGE", 1)
+    contract.assess_item(agreement_id, 1)
+    item = contract.get_item(agreement_id, 1)
+    assert item["cure_status"] == "NOT_APPLICABLE"
+    assert item["original_deduction_wei"] == item["effective_deduction_wei"] == GEN // 10
+    assert contract.get_agreement(agreement_id)["cure_window_seconds"] == 0
+    assert contract.get_agreement(agreement_id)["open_cure_count"] == 0
+    contract.mark_ready(agreement_id)
+
+
 def test_restored_cure_reduces_only_its_item_and_preserves_original_audit(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
     contract = direct_deploy(CONTRACT)
     agreement_id = create_visual_case(contract, direct_vm, direct_alice, direct_bob, "NEW_DAMAGE", 3, count=2, cure_window=3600)

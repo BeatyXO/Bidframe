@@ -17,7 +17,7 @@ This is the implementation-stage hostile review for the Remediation / Cure Verif
 
 ## Checks run
 
-- Direct Mode: `python -m pytest tests/test_bidframe.py -v --tb=short` — 28 passed.
+- Direct Mode: `python -m pytest tests/test_bidframe.py -v --tb=short` — 29 passed.
 - Fast GenVM AST checks: `genvm-lint lint contracts/Bidframe.py` — 3 checks passed.
 - GenVM full check with the contract-compatible runtime selected explicitly: `GENVM_VERSION=v0.2.16 genvm-lint check contracts/Bidframe.py` — 3 AST checks and SDK validation pass; schema exposes 21 methods (3 views, 18 writes).
 - GenVM SDK typecheck: `GENVM_VERSION=v0.2.16 genvm-lint typecheck contracts/Bidframe.py` — no type errors.
