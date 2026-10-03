@@ -4,13 +4,13 @@
 
 Bidframe is a single Intelligent Contract plus a reviewer-facing web application for settling security deposits from sealed before/after evidence. A landlord defines the parties, deposit, inventory, move-in evidence hashes, and item-level deduction schedule before funds are locked. At checkout, GenLayer validators inspect the exact evidence bytes and return only a bounded condition classification. The contract converts that classification into a deterministic deduction and never lets the model invent a price, recipient, item, or payout.
 
-> Current remediation milestone contract: [`0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`](https://explorer-studio.genlayer.com/address/0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E), freshly deployed to StudioNet 61999 with verified source parity. The earlier submission contract [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7) and Agreements #3/#4 remain historical submission evidence in `docs/SUBMISSION.md` and `docs/studionet-new-damage-lifecycle.json`. Read-only browser verification of the owner-reported Vercel redeployment confirmed the milestone contract link, StudioNet 61999, and canonical Agreement #2 cure and settlement fields. Wallet and write verification remain pending because the available browsers expose no injected wallet.
+> Current remediation milestone contract: [`0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E`](https://explorer-studio.genlayer.com/address/0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E), deployed to StudioNet 61999 with verified source parity. The production frontend is https://bidframe-seven.vercel.app/. The earlier submission contract [`0x3f5F81618cc86604f7094E525F46f37363CD99a7`](https://explorer-studio.genlayer.com/address/0x3f5F81618cc86604f7094E525F46f37363CD99a7) and Agreements #3/#4 remain historical pre-milestone evidence in `docs/SUBMISSION.md` and `docs/studionet-new-damage-lifecycle.json`.
 
 ## Remediation milestone
 
 This milestone extends Bidframe from one-shot damage settlement into remediation-aware deposit settlement: after a positive `NEW_DAMAGE` charge, the tenant can make one bounded, immutable repair-evidence submission, and GenLayer checks whether the damage was restored. Deterministic contract logic then removes or preserves that item's original charged amount. The DRAFT cure policy is frozen at funding, and waiver/expiry preserve settlement liveness. The implementation and synthetic live lifecycle proof are complete. See [`docs/MILESTONE.md`](docs/MILESTONE.md) and [`docs/MILESTONE_LIVE_VERIFICATION.md`](docs/MILESTONE_LIVE_VERIFICATION.md).
 
-> Remediation status: implementation, hostile review, CI, fresh StudioNet deployment/source parity, and the synthetic mixed-verdict live settlement are recorded in [`docs/MILESTONE_LIVE_VERIFICATION.md`](docs/MILESTONE_LIVE_VERIFICATION.md). The owner reports that Vercel was redeployed with the milestone contract, and read-only browser checks confirmed the live app's contract link and Agreement #2 fields. Wallet connection/network handling and a safe write/receipt check remain unverified because no injected wallet is available in the browser environment.
+> Remediation status: **complete**. Implementation, hostile review, CI, fresh StudioNet deployment/source parity, and the synthetic mixed-verdict Agreement #2 settlement are recorded in [`docs/MILESTONE_LIVE_VERIFICATION.md`](docs/MILESTONE_LIVE_VERIFICATION.md). Read-only production browser checks confirmed the live app's milestone contract and Agreement #2 fields; the owner reports completing final wallet-enabled browser verification. No separate browser-originated write hash was supplied, as disclosed in the milestone record.
 
 ## Why GenLayer
 
@@ -80,8 +80,9 @@ The UI is purple/white, responsive, and exposes:
 - create an agreement and register multiple items with HTTPS evidence, SHA-256, and frozen caps;
 - fund the exact GEN deposit from the tenant wallet;
 - open checkout and submit, challenge, propose, and accept evidence replacements;
-- run consensus assessments and display bounded verdicts, severity, reasoning, and deterministic deductions;
-- block READY while an item is incomplete or has an unresolved `INCONCLUSIVE`; expose zero-deduction recovery for challenged or inconclusive evidence;
+- run consensus assessments and display bounded verdicts, severity, reasoning, and original versus effective deductions;
+- configure a DRAFT-only cure period, submit one immutable tenant cure per eligible `NEW_DAMAGE` item, and assess, waive, or expire open cures;
+- block READY while an item is incomplete, has an unresolved `INCONCLUSIVE`, or has an open cure; expose zero-deduction recovery for challenged or inconclusive evidence;
 - mark ready, settle, and show final deduction/refund state;
 - connect an injected EIP-1193 wallet to StudioNet 61999;
 - restore already-authorized StudioNet wallet sessions without a popup, expose a copy/explorer/local-disconnect wallet menu, and automatically rebuild the write client after account/network changes when safe;
@@ -90,14 +91,13 @@ The UI is purple/white, responsive, and exposes:
 
 ## Contract workflow
 
-1. Landlord calls `create_agreement(...)`.
-2. Landlord registers one or more items with `add_item(...)`.
-3. Tenant calls payable `fund_agreement(id)` with the exact GEN deposit.
-4. Either party opens checkout with `open_checkout(id)`.
-5. Checkout evidence is submitted for each item with `submit_checkout_evidence(...)`; the counterparty may challenge before assessment, and replacement evidence needs acceptance from the other party. A challenged item may also be conservatively resolved at zero deduction so a challenge cannot deadlock the deposit.
-6. Either party calls `assess_item(...)`; GenLayer validators verify hashes and classify visual change. A finalized `INCONCLUSIVE` can be explicitly resolved at zero deduction.
-7. Once every item is resolved and no unresolved `INCONCLUSIVE` remains, `mark_ready(id)` freezes settlement totals.
-8. Either party calls `settle(id)`; the contract emits deterministic GEN transfers to the landlord and tenant.
+1. Landlord calls `create_agreement(...)`, sets the cure period in DRAFT, and registers items with `add_item(...)`.
+2. Tenant calls payable `fund_agreement(id)` with the exact GEN deposit, freezing the inventory and cure policy.
+3. Either party opens checkout with `open_checkout(id)`. Checkout evidence may be challenged and replaced under the frozen evidence rules.
+4. Either party calls `assess_item(...)`; GenLayer verifies evidence hashes and classifies the condition change. A positive charged `NEW_DAMAGE` result opens that item's bounded cure opportunity.
+5. The tenant may submit one immutable cure evidence pair before the deadline. GenLayer returns `RESTORED`, `NOT_RESTORED`, or `INCONCLUSIVE`; waiver and expiry close unused or unresolved cure opportunities. `RESTORED` reduces only that item's effective deduction.
+6. Once all original assessments are resolved and no cure remains open, `mark_ready(id)` freezes settlement totals.
+7. Either party calls `settle(id)`; the contract emits deterministic GEN transfers from the effective deductions.
 
 ## Testing
 
@@ -109,11 +109,11 @@ genvm-lint check contracts/Bidframe.py
 gltest tests/ -v
 ```
 
-The current deployment is documented in [`docs/SUBMISSION.md`](docs/SUBMISSION.md). The earlier StudioNet deployment is retained only as historical evidence because it predates the liveness fixes.
+The current remediation deployment and Agreement #2 lifecycle are documented in [`docs/MILESTONE_LIVE_VERIFICATION.md`](docs/MILESTONE_LIVE_VERIFICATION.md). [`docs/SUBMISSION.md`](docs/SUBMISSION.md) preserves the earlier submission deployment and Agreements #3/#4 as historical evidence.
 
 ## Deployment
 
-The current canonical contract is deployed to stable StudioNet 61999. To deploy a future validated revision:
+The current remediation contract is `0x9705Fa2dCc1A9b9CD545999F6a93bB4508dD997E` on stable StudioNet 61999. To deploy a future validated revision:
 
 ```bash
 genlayer network set studionet
@@ -121,7 +121,7 @@ genlayer network info
 genlayer deploy --contract contracts/Bidframe.py
 ```
 
-Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in `docs/SUBMISSION.md`. Current source and lifecycle evidence are recorded there. Agreement #4 provides the positive economic proof: finalized `NEW_DAMAGE` severity 3, deterministic 0.5 GEN deduction, and finalized 0.5 GEN / 0.5 GEN native transfers to landlord and tenant. A separate historical StudioNet residual-balance observation from an earlier rolled-back pre-inventory funding attempt is documented transparently in the submission evidence and threat model; it is not counted as Agreement #4 escrow.
+Record any future deployment address, transaction, exact source commit, source hash, and live lifecycle transactions in a new release record. The current remediation source and lifecycle proof are in `docs/MILESTONE_LIVE_VERIFICATION.md`. The historical submission Agreement #4 proves its own positive economic path, and its separate residual-balance observation remains disclosed in the submission evidence and threat model.
 
 ## License
 
